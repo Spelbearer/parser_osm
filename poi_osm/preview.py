@@ -85,7 +85,7 @@ def run(args):
         metrics = store.metrics()
         metrics.pop("changes", None)
         categories = dict(store.db.execute("SELECT tag,COUNT(*) FROM poi GROUP BY tag ORDER BY tag"))
-        store._csv(output / "poi.csv", "SELECT " + ",".join(FIELDS) + " FROM poi ORDER BY osm_type,osm_id,tag", ())
+        store._csv(output / "poi_by_tag.csv", "SELECT " + ",".join(FIELDS) + " FROM poi ORDER BY osm_type,osm_id,tag", ())
         store.export(output, [r["region_code"] for r in regions], parquet=True)
         (output / "all_russia.parquet").rename(output / "poi_assigned.parquet")
         store.close()
@@ -96,7 +96,7 @@ def run(args):
         manifest.update(status=status, metrics=metrics, by_category=categories, parsing=parsing,
                         warning="Unreviewed boundaries and unverified completeness. Not a production publication.")
         atomic_json(output / "summary.json", manifest)
-        logging.info("%s: %s POI; unresolved=%s; output=%s", status, metrics["total"], parsing.get("unresolved_objects", 0), output)
+        logging.info("%s: %s unique objects; %s category rows; unresolved=%s; output=%s", status, metrics["unique_objects"], metrics["total"], parsing.get("unresolved_objects", 0), output)
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return 0
     except Exception as error:

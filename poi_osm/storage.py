@@ -100,7 +100,9 @@ class Registry:
         regions = dict(self.db.execute("SELECT COALESCE(region_code,''),COUNT(*) FROM poi WHERE record_status!='DELETED' GROUP BY region_code"))
         changes = dict(self.db.execute("SELECT status,COUNT(*) FROM changes GROUP BY status"))
         changes["UNCHANGED"] = self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status='UNCHANGED'").fetchone()[0]
+        unique = self.db.execute("SELECT COUNT(*) FROM (SELECT osm_type,osm_id FROM poi WHERE record_status!='DELETED' GROUP BY osm_type,osm_id)").fetchone()[0]
         return {"total": total, "nameless_fraction": nameless / total if total else 0,
+                "category_rows": total, "unique_objects": unique, "extra_category_rows": total - unique,
                 "unassigned_fraction": unassigned / total if total else 0,
                 "by_region": regions, "changes": changes,
                 "by_category": dict(self.db.execute("SELECT category,COUNT(*) FROM poi WHERE record_status!='DELETED' GROUP BY category")),
@@ -134,6 +136,8 @@ class Registry:
             decoded_count = sum(batch.num_rows for batch in saved.iter_batches(batch_size=self.batch_size))
             if saved.metadata.num_rows != count or decoded_count != count or saved.schema_arrow != schema:
                 raise ValueError("Parquet verification failed")
+        from .objects import export_objects
+        export_objects(self.db, run, parquet=parquet, batch_size=self.batch_size, region_codes=region_codes)
 
     def _csv(self, path: Path, query: str, args: tuple):
         count = 0
