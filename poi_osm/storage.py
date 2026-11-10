@@ -111,7 +111,7 @@ class Registry:
                 "chain_not_identified_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND chain_status='not_identified'").fetchone()[0],
                 "chain_conflict_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND chain_status='conflict'").fetchone()[0]}
 
-    def export(self, run: Path, region_codes: list[str], parquet: bool):
+    def export(self, run: Path, region_codes: list[str], parquet: bool, *, selection_rules=None):
         (run / "full").mkdir()
         (run / "delta").mkdir()
         for code in region_codes + [""]:
@@ -137,7 +137,7 @@ class Registry:
             if saved.metadata.num_rows != count or decoded_count != count or saved.schema_arrow != schema:
                 raise ValueError("Parquet verification failed")
         from .objects import export_objects
-        export_objects(self.db, run, parquet=parquet, batch_size=self.batch_size, region_codes=region_codes)
+        return export_objects(self.db, run, parquet=parquet, batch_size=self.batch_size, region_codes=region_codes, selection_rules=selection_rules)
 
     def _csv(self, path: Path, query: str, args: tuple):
         count = 0

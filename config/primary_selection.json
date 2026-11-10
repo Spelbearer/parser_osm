@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "description": "Выбор одной основной категории для Teradata. Сначала выбираются только строки is_telecom=1, если они есть. Внутри телефонии сначала учитывается telecom_type_priority, затем telecom_tag_priority. Если телефонии нет — other_tag_priority. Чем раньше значение в списке, тем выше приоритет. Неуказанные значения выбираются последними в алфавитном порядке. Исходные теги не удаляются.",
+  "telecom_type_priority": ["Ремонт телефонов"],
+  "telecom_tag_priority": [
+    "mobile_phone_repair", "mobile_phone", "telecommunication", "telecom",
+    "electronics_repair", "electronics", "computer", "repair"
+  ],
+  "other_tag_priority": [
+    "outpost", "parcel_locker", "supermarket", "convenience", "greengrocer",
+    "bakery", "confectionery", "health_food", "frozen_food", "nuts", "tea", "wine", "alcohol", "ice_cream",
+    "hotel", "fitness_centre", "hairdresser", "beauty", "optician", "cosmetics",
+    "tailor", "shoes", "shoe_repair", "second_hand", "sewing", "baby_goods", "toys", "books",
+    "hardware", "houseware", "garden_centre", "florist", "locksmith", "key_cutter",
+    "photographer", "photographic_laboratory", "laundry", "sports", "tobacco",
+    "mall", "department_store", "variety_store", "general", "kiosk"
+  ]
+}

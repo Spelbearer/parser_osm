@@ -159,7 +159,7 @@ def run(args):
             metrics = store.metrics()
             atomic_json(stage / "quality.json", metrics)
             check_quality(metrics, previous["metrics"] if previous else None, settings["quality"])
-            store.export(stage, [code] if code else [r["region_code"] for r in registry_config["regions"]], settings.get("write_parquet", True))
+            object_export = store.export(stage, [code] if code else [r["region_code"] for r in registry_config["regions"]], settings.get("write_parquet", True), selection_rules=settings["primary_rules"])
             if args.duplicates:
                 from .duplicates import report_duplicates
                 report_duplicates(store.db, stage / "duplicate_candidates.csv", settings.get("duplicate_distance_m", 30))
@@ -170,7 +170,7 @@ def run(args):
             manifest = {"run_id": run_id, "mode": args.mode, "scope": code or "ALL", "status": "SUCCESS",
                         "contract_hash": contract, "source_date": source["source_date"],
                         "source_sha256": source["sha256"], "source_url": source.get("source_url"),
-                        "source_bytes": source["size_bytes"], "metrics": metrics, "parsing": parsing,
+                        "source_bytes": source["size_bytes"], "metrics": metrics, "parsing": parsing, "object_export": object_export,
                         "elapsed_seconds": round(time.monotonic() - started, 3),
                         "output": str(destination), "registry": str(destination / "registry.sqlite")}
             atomic_json(stage / "manifest.json", manifest)

@@ -86,14 +86,14 @@ def run(args):
         metrics.pop("changes", None)
         categories = dict(store.db.execute("SELECT tag,COUNT(*) FROM poi GROUP BY tag ORDER BY tag"))
         store._csv(output / "poi_by_tag.csv", "SELECT " + ",".join(FIELDS) + " FROM poi ORDER BY osm_type,osm_id,tag", ())
-        store.export(output, [r["region_code"] for r in regions], parquet=True)
+        object_export = store.export(output, [r["region_code"] for r in regions], parquet=True, selection_rules=settings["primary_rules"])
         (output / "all_russia.parquet").rename(output / "poi_assigned.parquet")
         store.close()
         store = None
         # No production quality gate: this report is explicitly incomplete,
         # unreviewed, and cannot declare objects deleted or advance state.
         status = "PREVIEW_INCOMPLETE" if parsing.get("unresolved_objects") else "PREVIEW_SUCCESS"
-        manifest.update(status=status, metrics=metrics, by_category=categories, parsing=parsing,
+        manifest.update(status=status, metrics=metrics, by_category=categories, parsing=parsing, object_export=object_export,
                         warning="Unreviewed boundaries and unverified completeness. Not a production publication.")
         atomic_json(output / "summary.json", manifest)
         logging.info("%s: %s unique objects; %s category rows; unresolved=%s; output=%s", status, metrics["unique_objects"], metrics["total"], parsing.get("unresolved_objects", 0), output)

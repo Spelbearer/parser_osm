@@ -12,8 +12,9 @@ from itertools import groupby
 from pathlib import Path
 
 from .storage import FIELDS, BOOLEAN_FIELDS
+from .selection import PRIMARY_FIELDS, TERADATA_FIELDS, PrimarySelector
 
-OBJECT_FIELDS = FIELDS + ["osm_uid", "tag_count", "classifications"]
+OBJECT_FIELDS = FIELDS + ["osm_uid", "tag_count", "classifications"] + PRIMARY_FIELDS
 MULTI_FIELDS = {"tag", "osm_key", "osm_value", "category", "subcategory", "telecom_type", "telecom_evidence", "chain_evidence"}
 INVARIANTS = {"point_name", "lon", "lat", "wkt", "region_name", "region_code", "region_id", "country", "address",
               "brand", "operator", "source_date", "source_file"}
@@ -61,40 +62,51 @@ def object_rows(db):
         yield collapse(group)
 
 
-def export_objects(db, output: Path, *, parquet=True, batch_size=5000, region_codes=None):
+def export_objects(db, output: Path, *, parquet=True, batch_size=5000, region_codes=None, selection_rules=None):
     """Export bounded batches. Existing files are protected from overwrite."""
     import pyarrow as pa
     import pyarrow.parquet as pq
     from contextlib import ExitStack
+    selector = PrimarySelector(selection_rules)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    targets = [output / "poi.csv", output / "objects"] + ([output / "poi_objects.parquet"] if parquet else [])
+    targets = [output / "poi.csv", output / "poi_teradata.csv", output / "objects"] + ([output / "poi_objects.parquet", output / "poi_teradata.parquet"] if parquet else [])
     if any(p.exists() for p in targets):
         raise FileExistsError("Object export already exists; choose a new output directory")
     (output / "objects").mkdir()
     dates = {"update_date", "source_date", "first_seen_date", "last_seen_date"}
-    schema = pa.schema([(k, pa.float64() if k in {"lon", "lat"} else pa.date32() if k in dates else
-                        pa.bool_() if k in BOOLEAN_FIELDS else pa.int64() if k == "tag_count" else pa.string()) for k in OBJECT_FIELDS])
+    def arrow_schema(fields):
+        return pa.schema([(k, pa.float64() if k in {"lon", "lat"} else pa.date32() if k in dates else
+                          pa.bool_() if k in BOOLEAN_FIELDS else pa.int64() if k == "tag_count" else pa.string()) for k in fields])
+    schema, td_schema = arrow_schema(OBJECT_FIELDS), arrow_schema(TERADATA_FIELDS)
     total = assigned = category_rows = 0
     counts = {}
     with ExitStack() as stack:
-        def csv_writer(path):
+        def csv_writer(path, fields=OBJECT_FIELDS):
             stream = stack.enter_context(path.open("x", encoding="utf-8-sig", newline=""))
-            writer = csv.DictWriter(stream, fieldnames=OBJECT_FIELDS, delimiter=";")
+            writer = csv.DictWriter(stream, fieldnames=fields, delimiter=";")
             writer.writeheader()
             return writer
         all_writer = csv_writer(output / "poi.csv")
+        td_csv = csv_writer(output / "poi_teradata.csv", TERADATA_FIELDS)
         codes = list(dict.fromkeys((region_codes or []) + [""]))
         if any(not all(c.isalnum() or c in "-_" for c in code) for code in codes):
             raise ValueError("Unsafe region_code for output filename")
         regions = {code: csv_writer(output / "objects" / f"{code or 'unassigned'}.csv") for code in codes}
         writer = stack.enter_context(pq.ParquetWriter(output / "poi_objects.parquet", schema, compression="zstd")) if parquet else None
-        batch = []
+        td_writer = stack.enter_context(pq.ParquetWriter(output / "poi_teradata.parquet", td_schema, compression="zstd")) if parquet else None
+        batch, td_batch = [], []
         def flush():
             if batch and writer:
                 writer.write_table(pa.Table.from_pylist(batch, schema=schema))
+                td_writer.write_table(pa.Table.from_pylist(td_batch, schema=td_schema))
             batch.clear()
+            td_batch.clear()
+        def csv_values(row):
+            return {k:int(v) if k in BOOLEAN_FIELDS and v is not None else v for k,v in row.items()}
         for row in object_rows(db):
+            row = selector.enrich(row)
+            td_row = selector.teradata_row(row)
             total += 1
             category_rows += row["tag_count"]
             code = row["region_code"] or ""
@@ -104,24 +116,30 @@ def export_objects(db, output: Path, *, parquet=True, batch_size=5000, region_co
                 if not all(c.isalnum() or c in "-_" for c in code):
                     raise ValueError("Unsafe region_code for output filename")
                 regions[code] = csv_writer(output / "objects" / f"{code}.csv")
-            all_writer.writerow(row)
-            regions[code].writerow(row)
+            csv_row = csv_values(row)
+            all_writer.writerow(csv_row)
+            regions[code].writerow(csv_row)
+            td_csv.writerow(csv_values(td_row))
             counts[code] = counts.get(code, 0) + 1
             assigned += bool(code)
             if writer:
                 batch.append({k: date.fromisoformat(v) if k in dates and v else v for k, v in row.items()})
+                td_batch.append({k: date.fromisoformat(v) if k in dates and v else v for k,v in td_row.items()})
                 if len(batch) >= batch_size:
                     flush()
         flush()
-    with (output / "poi.csv").open(encoding="utf-8-sig", newline="") as stream:
-        if sum(1 for _ in csv.DictReader(stream, delimiter=";")) != total:
-            raise ValueError("Object CSV count verification failed")
+    for filename, fields in [("poi.csv",OBJECT_FIELDS), ("poi_teradata.csv",TERADATA_FIELDS)]:
+        with (output / filename).open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream, delimiter=";")
+            if reader.fieldnames != fields or sum(1 for _ in reader) != total:
+                raise ValueError(f"CSV count/schema verification failed: {filename}")
     if parquet:
-        with pq.ParquetFile(output / "poi_objects.parquet") as saved:
-            if saved.schema_arrow != schema or sum(b.num_rows for b in saved.iter_batches(batch_size=batch_size)) != total:
-                raise ValueError("Object Parquet verification failed")
+        for filename, expected in [("poi_objects.parquet",schema), ("poi_teradata.parquet",td_schema)]:
+            with pq.ParquetFile(output / filename) as saved:
+                if saved.schema_arrow != expected or sum(b.num_rows for b in saved.iter_batches(batch_size=batch_size)) != total:
+                    raise ValueError(f"Parquet verification failed: {filename}")
     return {"unique_objects": total, "category_rows": category_rows, "extra_category_rows": category_rows - total,
-            "assigned_objects": assigned, "by_region_objects": counts}
+            "assigned_objects": assigned, "by_region_objects": counts, "primary_rules_sha256": selector.fingerprint}
 
 
 def main(argv=None):
@@ -130,6 +148,7 @@ def main(argv=None):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     cli = argparse.ArgumentParser(description="Build one-row-per-object exports from an existing SQLite registry, without reading PBF")
     cli.add_argument("input", type=Path, help="Existing preview/run directory or its .sqlite file")
+    cli.add_argument("--priority-config", type=Path, help="Custom primary_selection.json; original registry stays unchanged")
     args = cli.parse_args(argv)
     path = args.input.resolve()
     if path.is_dir():
@@ -145,7 +164,8 @@ def main(argv=None):
         if source_status not in {"UNKNOWN", "PREVIEW_SUCCESS", "PREVIEW_INCOMPLETE", "SUCCESS"}:
             raise ValueError("Source run did not complete; do not export its partial registry")
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
-            result = export_objects(db, output)
+            rules = json.loads(args.priority_config.read_text(encoding="utf-8")) if args.priority_config else None
+            result = export_objects(db, output, selection_rules=rules)
         report = {"output": str(output), "source_registry": str(path), "source_status": source_status,
                   "format": "one_row_per_osm_object", **result}
         from .runtime import atomic_json

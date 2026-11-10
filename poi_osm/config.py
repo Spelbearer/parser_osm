@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 from .classification import CONFIG, Classifier
+from .selection import PrimarySelector
 
 
 def load_settings(path: Path) -> dict:
@@ -18,10 +19,11 @@ def load_settings(path: Path) -> dict:
     if settings.get("input"):
         settings["input"]["path"] = str((root / settings["input"]["path"]).resolve())
     settings["mapping"] = json.loads(Path(settings["tag_mapping"]).read_text(encoding="utf-8"))
-    for name, filename, target in [("categories", "categories.json", "category_rules"), ("chains", "chains.json", "chain_rules"), ("telecom", "telecom.json", "telecom_rules")]:
+    for name, filename, target in [("categories", "categories.json", "category_rules"), ("chains", "chains.json", "chain_rules"), ("telecom", "telecom.json", "telecom_rules"), ("primary_selection", "primary_selection.json", "primary_rules")]:
         rule_path = (root / settings[name]).resolve() if settings.get(name) else CONFIG / filename
         settings[target] = json.loads(rule_path.read_text(encoding="utf-8"))
     Classifier(settings["category_rules"], settings["chain_rules"], settings["telecom_rules"])
+    PrimarySelector(settings["primary_rules"])
     mapping = settings["mapping"]
     if not isinstance(mapping, dict) or not mapping:
         raise ValueError("tag_mapping must be a nonempty category -> keys object")
