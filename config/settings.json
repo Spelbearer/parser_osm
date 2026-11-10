@@ -1,0 +1,29 @@
+{
+  "project_root": "..",
+  "coverage_id": "ru-internationally-recognized",
+  "coverage_confirmed": true,
+  "boundaries_reviewed": false,
+  "tag_mapping": "config/tag_mapping.json",
+  "regions": "config/regions.json",
+  "boundaries": "boundaries/regions.geojson",
+  "name_priority": ["name", "name:ru", "official_name", "brand", "operator"],
+  "line_policy": "midpoint",
+  "batch_size": 5000,
+  "write_parquet": true,
+  "quality": {
+    "max_count_drop_fraction": 0.25,
+    "max_region_drop_fraction": 0.25,
+    "max_unassigned_fraction": 0.01,
+    "allow_empty": false
+  },
+  "sources": [
+    {
+      "url": "https://download.geofabrik.de/russia-latest.osm.pbf",
+      "checksum_url": "https://download.geofabrik.de/russia-latest.osm.pbf.md5",
+      "checksum_algorithm": "md5",
+      "coverage_id": "ru-internationally-recognized",
+      "complete": true,
+      "max_age_days": 45
+    }
+  ]
+}

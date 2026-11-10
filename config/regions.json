@@ -1,0 +1,421 @@
+{
+  "source": "ISO 3166-2:RU; https://www.iso.org/obp/ui/#iso:code:3166:RU (code list reference; live access not verified during development)",
+  "coverage_id": "ru-internationally-recognized",
+  "regions": [
+    {
+      "region_code": "RU-AD",
+      "region_name": "Республика Адыгея",
+      "region_id": "RU-AD"
+    },
+    {
+      "region_code": "RU-AL",
+      "region_name": "Республика Алтай",
+      "region_id": "RU-AL"
+    },
+    {
+      "region_code": "RU-ALT",
+      "region_name": "Алтайский край",
+      "region_id": "RU-ALT"
+    },
+    {
+      "region_code": "RU-AMU",
+      "region_name": "Амурская область",
+      "region_id": "RU-AMU"
+    },
+    {
+      "region_code": "RU-ARK",
+      "region_name": "Архангельская область",
+      "region_id": "RU-ARK"
+    },
+    {
+      "region_code": "RU-AST",
+      "region_name": "Астраханская область",
+      "region_id": "RU-AST"
+    },
+    {
+      "region_code": "RU-BA",
+      "region_name": "Республика Башкортостан",
+      "region_id": "RU-BA"
+    },
+    {
+      "region_code": "RU-BEL",
+      "region_name": "Белгородская область",
+      "region_id": "RU-BEL"
+    },
+    {
+      "region_code": "RU-BRY",
+      "region_name": "Брянская область",
+      "region_id": "RU-BRY"
+    },
+    {
+      "region_code": "RU-BU",
+      "region_name": "Республика Бурятия",
+      "region_id": "RU-BU"
+    },
+    {
+      "region_code": "RU-CE",
+      "region_name": "Чеченская Республика",
+      "region_id": "RU-CE"
+    },
+    {
+      "region_code": "RU-CHE",
+      "region_name": "Челябинская область",
+      "region_id": "RU-CHE"
+    },
+    {
+      "region_code": "RU-CHU",
+      "region_name": "Чукотский автономный округ",
+      "region_id": "RU-CHU"
+    },
+    {
+      "region_code": "RU-CU",
+      "region_name": "Чувашская Республика",
+      "region_id": "RU-CU"
+    },
+    {
+      "region_code": "RU-DA",
+      "region_name": "Республика Дагестан",
+      "region_id": "RU-DA"
+    },
+    {
+      "region_code": "RU-IN",
+      "region_name": "Республика Ингушетия",
+      "region_id": "RU-IN"
+    },
+    {
+      "region_code": "RU-IRK",
+      "region_name": "Иркутская область",
+      "region_id": "RU-IRK"
+    },
+    {
+      "region_code": "RU-IVA",
+      "region_name": "Ивановская область",
+      "region_id": "RU-IVA"
+    },
+    {
+      "region_code": "RU-KAM",
+      "region_name": "Камчатский край",
+      "region_id": "RU-KAM"
+    },
+    {
+      "region_code": "RU-KB",
+      "region_name": "Кабардино-Балкарская Республика",
+      "region_id": "RU-KB"
+    },
+    {
+      "region_code": "RU-KC",
+      "region_name": "Карачаево-Черкесская Республика",
+      "region_id": "RU-KC"
+    },
+    {
+      "region_code": "RU-KDA",
+      "region_name": "Краснодарский край",
+      "region_id": "RU-KDA"
+    },
+    {
+      "region_code": "RU-KEM",
+      "region_name": "Кемеровская область — Кузбасс",
+      "region_id": "RU-KEM"
+    },
+    {
+      "region_code": "RU-KGD",
+      "region_name": "Калининградская область",
+      "region_id": "RU-KGD"
+    },
+    {
+      "region_code": "RU-KGN",
+      "region_name": "Курганская область",
+      "region_id": "RU-KGN"
+    },
+    {
+      "region_code": "RU-KHA",
+      "region_name": "Хабаровский край",
+      "region_id": "RU-KHA"
+    },
+    {
+      "region_code": "RU-KHM",
+      "region_name": "Ханты-Мансийский автономный округ — Югра",
+      "region_id": "RU-KHM"
+    },
+    {
+      "region_code": "RU-KIR",
+      "region_name": "Кировская область",
+      "region_id": "RU-KIR"
+    },
+    {
+      "region_code": "RU-KK",
+      "region_name": "Республика Хакасия",
+      "region_id": "RU-KK"
+    },
+    {
+      "region_code": "RU-KL",
+      "region_name": "Республика Калмыкия",
+      "region_id": "RU-KL"
+    },
+    {
+      "region_code": "RU-KLU",
+      "region_name": "Калужская область",
+      "region_id": "RU-KLU"
+    },
+    {
+      "region_code": "RU-KO",
+      "region_name": "Республика Коми",
+      "region_id": "RU-KO"
+    },
+    {
+      "region_code": "RU-KOS",
+      "region_name": "Костромская область",
+      "region_id": "RU-KOS"
+    },
+    {
+      "region_code": "RU-KR",
+      "region_name": "Республика Карелия",
+      "region_id": "RU-KR"
+    },
+    {
+      "region_code": "RU-KRS",
+      "region_name": "Курская область",
+      "region_id": "RU-KRS"
+    },
+    {
+      "region_code": "RU-KYA",
+      "region_name": "Красноярский край",
+      "region_id": "RU-KYA"
+    },
+    {
+      "region_code": "RU-LEN",
+      "region_name": "Ленинградская область",
+      "region_id": "RU-LEN"
+    },
+    {
+      "region_code": "RU-LIP",
+      "region_name": "Липецкая область",
+      "region_id": "RU-LIP"
+    },
+    {
+      "region_code": "RU-MAG",
+      "region_name": "Магаданская область",
+      "region_id": "RU-MAG"
+    },
+    {
+      "region_code": "RU-ME",
+      "region_name": "Республика Марий Эл",
+      "region_id": "RU-ME"
+    },
+    {
+      "region_code": "RU-MO",
+      "region_name": "Республика Мордовия",
+      "region_id": "RU-MO"
+    },
+    {
+      "region_code": "RU-MOS",
+      "region_name": "Московская область",
+      "region_id": "RU-MOS"
+    },
+    {
+      "region_code": "RU-MOW",
+      "region_name": "Москва",
+      "region_id": "RU-MOW"
+    },
+    {
+      "region_code": "RU-MUR",
+      "region_name": "Мурманская область",
+      "region_id": "RU-MUR"
+    },
+    {
+      "region_code": "RU-NEN",
+      "region_name": "Ненецкий автономный округ",
+      "region_id": "RU-NEN"
+    },
+    {
+      "region_code": "RU-NGR",
+      "region_name": "Новгородская область",
+      "region_id": "RU-NGR"
+    },
+    {
+      "region_code": "RU-NIZ",
+      "region_name": "Нижегородская область",
+      "region_id": "RU-NIZ"
+    },
+    {
+      "region_code": "RU-NVS",
+      "region_name": "Новосибирская область",
+      "region_id": "RU-NVS"
+    },
+    {
+      "region_code": "RU-OMS",
+      "region_name": "Омская область",
+      "region_id": "RU-OMS"
+    },
+    {
+      "region_code": "RU-ORE",
+      "region_name": "Оренбургская область",
+      "region_id": "RU-ORE"
+    },
+    {
+      "region_code": "RU-ORL",
+      "region_name": "Орловская область",
+      "region_id": "RU-ORL"
+    },
+    {
+      "region_code": "RU-PER",
+      "region_name": "Пермский край",
+      "region_id": "RU-PER"
+    },
+    {
+      "region_code": "RU-PNZ",
+      "region_name": "Пензенская область",
+      "region_id": "RU-PNZ"
+    },
+    {
+      "region_code": "RU-PRI",
+      "region_name": "Приморский край",
+      "region_id": "RU-PRI"
+    },
+    {
+      "region_code": "RU-PSK",
+      "region_name": "Псковская область",
+      "region_id": "RU-PSK"
+    },
+    {
+      "region_code": "RU-ROS",
+      "region_name": "Ростовская область",
+      "region_id": "RU-ROS"
+    },
+    {
+      "region_code": "RU-RYA",
+      "region_name": "Рязанская область",
+      "region_id": "RU-RYA"
+    },
+    {
+      "region_code": "RU-SA",
+      "region_name": "Республика Саха (Якутия)",
+      "region_id": "RU-SA"
+    },
+    {
+      "region_code": "RU-SAK",
+      "region_name": "Сахалинская область",
+      "region_id": "RU-SAK"
+    },
+    {
+      "region_code": "RU-SAM",
+      "region_name": "Самарская область",
+      "region_id": "RU-SAM"
+    },
+    {
+      "region_code": "RU-SAR",
+      "region_name": "Саратовская область",
+      "region_id": "RU-SAR"
+    },
+    {
+      "region_code": "RU-SE",
+      "region_name": "Республика Северная Осетия — Алания",
+      "region_id": "RU-SE"
+    },
+    {
+      "region_code": "RU-SMO",
+      "region_name": "Смоленская область",
+      "region_id": "RU-SMO"
+    },
+    {
+      "region_code": "RU-SPE",
+      "region_name": "Санкт-Петербург",
+      "region_id": "RU-SPE"
+    },
+    {
+      "region_code": "RU-STA",
+      "region_name": "Ставропольский край",
+      "region_id": "RU-STA"
+    },
+    {
+      "region_code": "RU-SVE",
+      "region_name": "Свердловская область",
+      "region_id": "RU-SVE"
+    },
+    {
+      "region_code": "RU-TA",
+      "region_name": "Республика Татарстан",
+      "region_id": "RU-TA"
+    },
+    {
+      "region_code": "RU-TAM",
+      "region_name": "Тамбовская область",
+      "region_id": "RU-TAM"
+    },
+    {
+      "region_code": "RU-TOM",
+      "region_name": "Томская область",
+      "region_id": "RU-TOM"
+    },
+    {
+      "region_code": "RU-TUL",
+      "region_name": "Тульская область",
+      "region_id": "RU-TUL"
+    },
+    {
+      "region_code": "RU-TVE",
+      "region_name": "Тверская область",
+      "region_id": "RU-TVE"
+    },
+    {
+      "region_code": "RU-TY",
+      "region_name": "Республика Тыва",
+      "region_id": "RU-TY"
+    },
+    {
+      "region_code": "RU-TYU",
+      "region_name": "Тюменская область",
+      "region_id": "RU-TYU"
+    },
+    {
+      "region_code": "RU-UD",
+      "region_name": "Удмуртская Республика",
+      "region_id": "RU-UD"
+    },
+    {
+      "region_code": "RU-ULY",
+      "region_name": "Ульяновская область",
+      "region_id": "RU-ULY"
+    },
+    {
+      "region_code": "RU-VGG",
+      "region_name": "Волгоградская область",
+      "region_id": "RU-VGG"
+    },
+    {
+      "region_code": "RU-VLA",
+      "region_name": "Владимирская область",
+      "region_id": "RU-VLA"
+    },
+    {
+      "region_code": "RU-VLG",
+      "region_name": "Вологодская область",
+      "region_id": "RU-VLG"
+    },
+    {
+      "region_code": "RU-VOR",
+      "region_name": "Воронежская область",
+      "region_id": "RU-VOR"
+    },
+    {
+      "region_code": "RU-YAN",
+      "region_name": "Ямало-Ненецкий автономный округ",
+      "region_id": "RU-YAN"
+    },
+    {
+      "region_code": "RU-YAR",
+      "region_name": "Ярославская область",
+      "region_id": "RU-YAR"
+    },
+    {
+      "region_code": "RU-YEV",
+      "region_name": "Еврейская автономная область",
+      "region_id": "RU-YEV"
+    },
+    {
+      "region_code": "RU-ZAB",
+      "region_name": "Забайкальский край",
+      "region_id": "RU-ZAB"
+    }
+  ]
+}

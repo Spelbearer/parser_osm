@@ -1,0 +1,147 @@
+{
+  "health_food": [
+    "shop"
+  ],
+  "kiosk": [
+    "shop"
+  ],
+  "electronics": [
+    "shop"
+  ],
+  "greengrocer": [
+    "shop"
+  ],
+  "tailor": [
+    "shop",
+    "craft"
+  ],
+  "photographer": [
+    "craft",
+    "shop"
+  ],
+  "outpost": [],
+  "locksmith": [
+    "craft",
+    "shop"
+  ],
+  "bakery": [
+    "shop"
+  ],
+  "garden_centre": [
+    "shop"
+  ],
+  "sewing": [
+    "shop"
+  ],
+  "toys": [
+    "shop"
+  ],
+  "second_hand": [
+    "shop"
+  ],
+  "coffee": [],
+  "commercial": [],
+  "hardware": [
+    "shop"
+  ],
+  "department_store": [
+    "shop"
+  ],
+  "baby_goods": [
+    "shop"
+  ],
+  "hotel": [
+    "tourism"
+  ],
+  "laundry": [
+    "shop"
+  ],
+  "variety_store": [
+    "shop"
+  ],
+  "general": [
+    "shop"
+  ],
+  "books": [
+    "shop"
+  ],
+  "florist": [
+    "shop"
+  ],
+  "nuts": [
+    "shop"
+  ],
+  "confectionery": [
+    "shop"
+  ],
+  "houseware": [
+    "shop"
+  ],
+  "key_cutter": [
+    "shop"
+  ],
+  "retail": [],
+  "hairdresser": [
+    "shop"
+  ],
+  "wine": [
+    "shop"
+  ],
+  "supermarket": [
+    "shop"
+  ],
+  "ice_cream": [
+    "shop",
+    "amenity"
+  ],
+  "tobacco": [
+    "shop"
+  ],
+  "optician": [
+    "shop"
+  ],
+  "tea": [
+    "shop"
+  ],
+  "alcohol": [
+    "shop"
+  ],
+  "mobile_phone": [
+    "shop"
+  ],
+  "food": [],
+  "photographic_laboratory": [
+    "craft",
+    "shop"
+  ],
+  "shoe_repair": [
+    "shop"
+  ],
+  "beauty": [
+    "shop"
+  ],
+  "shoes": [
+    "shop"
+  ],
+  "frozen_food": [
+    "shop"
+  ],
+  "computer": [
+    "shop"
+  ],
+  "sports": [
+    "shop"
+  ],
+  "convenience": [
+    "shop"
+  ],
+  "fitness_centre": [
+    "leisure"
+  ],
+  "cosmetics": [
+    "shop"
+  ],
+  "mall": [
+    "shop"
+  ]
+}
