@@ -9,4 +9,5 @@ output/
 state/
 logs/
 demo/
+preview/
 *.egg-info/
