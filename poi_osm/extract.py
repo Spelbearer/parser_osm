@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import osmium
 from .runtime import cleanup_index
+from .classification import default_classifier
 from osmium.geom import WKBFactory
 from shapely import transform, wkb
 from shapely.geometry import Point
@@ -27,7 +28,7 @@ def matching_categories(tags: dict, mapping: dict[str, list[str]]):
 
 def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: list[str],
                  region_index, emit, review, work_dir: Path,
-                 line_policy: str = "midpoint", *, strict_geometry: bool = True) -> dict:
+                 line_policy: str = "midpoint", *, strict_geometry: bool = True, classifier=None) -> dict:
     """Read complete PBF without keeping its objects or coordinates in memory.
 
     Area assembly is delegated to libosmium's multipolygon manager. A separate
@@ -57,6 +58,7 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
         CREATE TABLE way_details(id INTEGER PRIMARY KEY, tags TEXT, detail TEXT);
     """)
     stats = Counter()
+    classifier = classifier or default_classifier()
     factory = WKBFactory()
     values_by_key = {}
     for category, keys in mapping.items():
@@ -147,6 +149,7 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
                     "region_id": str(region.get("region_id", "")) if region else "",
                     "country": "Россия" if region else None, "address": address,
                 }
+                row.update(classifier.classify(tags, category))
                 if region is None:
                     review({**row, "review_reason": getattr(region_index, "last_problem", None) or "unknown_region"})
                     stats["unknown_region"] += 1

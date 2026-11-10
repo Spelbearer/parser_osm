@@ -1,4 +1,5 @@
 import csv
+import sqlite3
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -125,3 +126,17 @@ def test_unassigned_quarantine_not_asserted_as_russian_parquet(tmp_path):
     assert len(unassigned) == 1
     assert unassigned[0]["country"] == ""
     store.close()
+
+
+def test_old_schema_rejected_before_snapshot_comparison(tmp_path):
+    old = tmp_path / 'old.sqlite'
+    with sqlite3.connect(old) as db:
+        db.execute('CREATE TABLE poi(osm_type TEXT,osm_id TEXT,tag TEXT)')
+        db.execute("INSERT INTO poi VALUES('node','1','bakery')")
+    store = Registry(tmp_path / 'new.sqlite', MAPPING, '2026-11-11', {'source_date':'2026-11-11','path':'source.pbf'})
+    store.insert(row())
+    with pytest.raises(ValueError, match='older schema'):
+        store.compare(old)
+    store.close()
+    with sqlite3.connect(old) as db:
+        assert db.execute('SELECT COUNT(*) FROM poi').fetchone()[0] == 1

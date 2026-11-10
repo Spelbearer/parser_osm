@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "tags": {
+    "health_food": {
+      "category": "Продукты питания",
+      "subcategory": "Здоровое питание"
+    },
+    "greengrocer": {
+      "category": "Продукты питания",
+      "subcategory": "Овощи и фрукты"
+    },
+    "bakery": {
+      "category": "Продукты питания",
+      "subcategory": "Пекарни"
+    },
+    "coffee": {
+      "category": "Продукты питания",
+      "subcategory": "Кофе"
+    },
+    "nuts": {
+      "category": "Продукты питания",
+      "subcategory": "Орехи"
+    },
+    "confectionery": {
+      "category": "Продукты питания",
+      "subcategory": "Кондитерские"
+    },
+    "wine": {
+      "category": "Продукты питания",
+      "subcategory": "Вино"
+    },
+    "supermarket": {
+      "category": "Продукты питания",
+      "subcategory": "Супермаркеты"
+    },
+    "ice_cream": {
+      "category": "Продукты питания",
+      "subcategory": "Мороженое"
+    },
+    "tea": {
+      "category": "Продукты питания",
+      "subcategory": "Чай"
+    },
+    "alcohol": {
+      "category": "Продукты питания",
+      "subcategory": "Алкоголь"
+    },
+    "food": {
+      "category": "Продукты питания",
+      "subcategory": "Продукты"
+    },
+    "frozen_food": {
+      "category": "Продукты питания",
+      "subcategory": "Замороженные продукты"
+    },
+    "convenience": {
+      "category": "Продукты питания",
+      "subcategory": "Продукты у дома"
+    },
+    "electronics": {
+      "category": "Электроника и компьютеры",
+      "subcategory": "Электроника"
+    },
+    "computer": {
+      "category": "Электроника и компьютеры",
+      "subcategory": "Компьютеры"
+    },
+    "electronics_repair": {
+      "category": "Электроника и компьютеры",
+      "subcategory": "Ремонт электроники"
+    },
+    "mobile_phone": {
+      "category": "Телефония и связь",
+      "subcategory": "Мобильные телефоны"
+    },
+    "mobile_phone_repair": {
+      "category": "Телефония и связь",
+      "subcategory": "Ремонт телефонов"
+    },
+    "telecommunication": {
+      "category": "Телефония и связь",
+      "subcategory": "Салоны и офисы связи"
+    },
+    "telecom": {
+      "category": "Телефония и связь",
+      "subcategory": "Салоны связи"
+    },
+    "tailor": {
+      "category": "Одежда, обувь и аксессуары",
+      "subcategory": "Ателье"
+    },
+    "sewing": {
+      "category": "Одежда, обувь и аксессуары",
+      "subcategory": "Шитьё и рукоделие"
+    },
+    "second_hand": {
+      "category": "Одежда, обувь и аксессуары",
+      "subcategory": "Секонд-хенд"
+    },
+    "shoes": {
+      "category": "Одежда, обувь и аксессуары",
+      "subcategory": "Обувь"
+    },
+    "toys": {
+      "category": "Детские товары и досуг",
+      "subcategory": "Игрушки"
+    },
+    "baby_goods": {
+      "category": "Детские товары и досуг",
+      "subcategory": "Детские товары"
+    },
+    "books": {
+      "category": "Детские товары и досуг",
+      "subcategory": "Книги"
+    },
+    "locksmith": {
+      "category": "Дом, сад и ремонт",
+      "subcategory": "Замки и ключи"
+    },
+    "garden_centre": {
+      "category": "Дом, сад и ремонт",
+      "subcategory": "Товары для сада"
+    },
+    "hardware": {
+      "category": "Дом, сад и ремонт",
+      "subcategory": "Хозяйственные и строительные товары"
+    },
+    "houseware": {
+      "category": "Дом, сад и ремонт",
+      "subcategory": "Товары для дома"
+    },
+    "key_cutter": {
+      "category": "Дом, сад и ремонт",
+      "subcategory": "Изготовление ключей"
+    },
+    "florist": {
+      "category": "Дом, сад и ремонт",
+      "subcategory": "Цветы"
+    },
+    "hairdresser": {
+      "category": "Красота и здоровье",
+      "subcategory": "Парикмахерские"
+    },
+    "optician": {
+      "category": "Красота и здоровье",
+      "subcategory": "Оптика"
+    },
+    "beauty": {
+      "category": "Красота и здоровье",
+      "subcategory": "Салоны красоты"
+    },
+    "cosmetics": {
+      "category": "Красота и здоровье",
+      "subcategory": "Косметика"
+    },
+    "sports": {
+      "category": "Спорт и фитнес",
+      "subcategory": "Спортивные товары"
+    },
+    "fitness_centre": {
+      "category": "Спорт и фитнес",
+      "subcategory": "Фитнес-центры"
+    },
+    "photographer": {
+      "category": "Бытовые услуги",
+      "subcategory": "Фотографы"
+    },
+    "laundry": {
+      "category": "Бытовые услуги",
+      "subcategory": "Прачечные"
+    },
+    "photographic_laboratory": {
+      "category": "Бытовые услуги",
+      "subcategory": "Фотолаборатории"
+    },
+    "shoe_repair": {
+      "category": "Бытовые услуги",
+      "subcategory": "Ремонт обуви"
+    },
+    "repair": {
+      "category": "Бытовые услуги",
+      "subcategory": "Ремонт и сервис"
+    },
+    "outpost": {
+      "category": "Пункты выдачи и логистика",
+      "subcategory": "Пункты выдачи заказов"
+    },
+    "parcel_locker": {
+      "category": "Пункты выдачи и логистика",
+      "subcategory": "Постаматы"
+    },
+    "hotel": {
+      "category": "Гостиницы",
+      "subcategory": "Гостиницы"
+    },
+    "kiosk": {
+      "category": "Универсальная торговля",
+      "subcategory": "Киоски"
+    },
+    "department_store": {
+      "category": "Универсальная торговля",
+      "subcategory": "Универмаги"
+    },
+    "variety_store": {
+      "category": "Универсальная торговля",
+      "subcategory": "Магазины фиксированных цен"
+    },
+    "general": {
+      "category": "Универсальная торговля",
+      "subcategory": "Универсальные магазины"
+    },
+    "mall": {
+      "category": "Универсальная торговля",
+      "subcategory": "Торговые центры"
+    },
+    "retail": {
+      "category": "Универсальная торговля",
+      "subcategory": "Розничные объекты"
+    },
+    "commercial": {
+      "category": "Прочее",
+      "subcategory": "Коммерческие объекты"
+    },
+    "tobacco": {
+      "category": "Табачная продукция",
+      "subcategory": "Табачные магазины"
+    }
+  }
+}

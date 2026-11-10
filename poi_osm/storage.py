@@ -9,10 +9,14 @@ from datetime import date
 from pathlib import Path
 
 from shapely import from_wkt
+from .classification import default_classifier
 
 FIELDS = ["tag", "osm_id", "point_name", "lon", "lat", "wkt", "region_name", "region_code",
           "osm_type", "update_date", "osm_key", "osm_value", "source_date", "first_seen_date",
-          "last_seen_date", "record_status", "source_file", "region_id", "country", "address"]
+          "last_seen_date", "record_status", "source_file", "region_id", "country", "address",
+          "category", "subcategory", "is_telecom", "telecom_type", "telecom_evidence",
+          "brand", "operator", "is_chain", "chain_id", "chain_name", "chain_status", "chain_evidence"]
+BOOLEAN_FIELDS = {"is_telecom", "is_chain"}
 CONTENT = [k for k in FIELDS if k not in {"update_date", "source_date", "first_seen_date",
                                         "last_seen_date", "record_status", "source_file"}]
 KEY = ("osm_type", "osm_id", "tag")
@@ -23,7 +27,7 @@ class Registry:
         self.db = sqlite3.connect(path, uri=True)
         self.db.execute("PRAGMA cache_size=-32768")
         self.db.execute("PRAGMA temp_store=FILE")
-        columns = ",".join(f'{k} {"REAL" if k in {"lon", "lat"} else "TEXT"}' for k in FIELDS)
+        columns = ",".join(f'{k} {"REAL" if k in {"lon", "lat"} else "INTEGER" if k in BOOLEAN_FIELDS else "TEXT"}' for k in FIELDS)
         self.db.execute(f"CREATE TABLE poi ({columns},fingerprint TEXT NOT NULL, PRIMARY KEY(osm_type,osm_id,tag))")
         self.db.execute("CREATE TABLE changes(osm_type TEXT,osm_id TEXT,tag TEXT,status TEXT,PRIMARY KEY(osm_type,osm_id,tag))")
         self.mapping, self.date, self.source = mapping, date, source
@@ -31,6 +35,9 @@ class Registry:
 
     def insert(self, row: dict):
         row = dict(row)
+        if "category" not in row:
+            row.update(default_classifier().classify({row.get("osm_key", ""): row.get("osm_value", ""),
+                                                     "name": row.get("point_name") or ""}, row.get("tag", "")))
         if row.get("osm_type") not in {"node", "way", "relation"} or not str(row.get("osm_id", "")).isdigit():
             raise ValueError("Invalid OSM identity")
         if row.get("osm_key") not in self.mapping.get(row.get("tag"), []) or row.get("osm_value") != row["tag"]:
@@ -64,6 +71,9 @@ class Registry:
         if previous:
             # read-only URI prevents accidentally creating/replacing a missing previous registry.
             self.db.execute("ATTACH DATABASE ? AS old", (previous.resolve().as_uri() + "?mode=ro",))
+            old_columns = {r[1] for r in self.db.execute("PRAGMA old.table_info(poi)")}
+            if not set(FIELDS) <= old_columns:
+                raise ValueError("Previous registry uses an older schema. Use a new project_root for a new baseline; preserve previous outputs.")
             match = "o.osm_type=poi.osm_type AND o.osm_id=poi.osm_id AND o.tag=poi.tag"
             self.db.execute(f"""UPDATE poi SET
                 first_seen_date=COALESCE((SELECT o.first_seen_date FROM old.poi o WHERE {match}),first_seen_date),
@@ -92,7 +102,12 @@ class Registry:
         changes["UNCHANGED"] = self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status='UNCHANGED'").fetchone()[0]
         return {"total": total, "nameless_fraction": nameless / total if total else 0,
                 "unassigned_fraction": unassigned / total if total else 0,
-                "by_region": regions, "changes": changes}
+                "by_region": regions, "changes": changes,
+                "by_category": dict(self.db.execute("SELECT category,COUNT(*) FROM poi WHERE record_status!='DELETED' GROUP BY category")),
+                "telecom_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND is_telecom=1").fetchone()[0],
+                "by_chain": dict(self.db.execute("SELECT chain_name,COUNT(*) FROM poi WHERE record_status!='DELETED' AND is_chain=1 GROUP BY chain_name")),
+                "chain_not_identified_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND chain_status='not_identified'").fetchone()[0],
+                "chain_conflict_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND chain_status='conflict'").fetchone()[0]}
 
     def export(self, run: Path, region_codes: list[str], parquet: bool):
         (run / "full").mkdir()
@@ -107,12 +122,12 @@ class Registry:
             import pyarrow as pa
             import pyarrow.parquet as pq
             dates = {"update_date", "source_date", "first_seen_date", "last_seen_date"}
-            schema = pa.schema([(k, pa.float64() if k in {"lon", "lat"} else pa.date32() if k in dates else pa.string()) for k in FIELDS])
+            schema = pa.schema([(k, pa.float64() if k in {"lon", "lat"} else pa.date32() if k in dates else pa.bool_() if k in BOOLEAN_FIELDS else pa.string()) for k in FIELDS])
             cursor = self.db.execute("SELECT " + ",".join(FIELDS) + " FROM poi WHERE record_status!='DELETED' AND COALESCE(region_code,'')!=''")
             count = 0
             with pq.ParquetWriter(run / "all_russia.parquet", schema, compression="zstd") as writer:
                 while rows := cursor.fetchmany(self.batch_size):
-                    records = [{k: date.fromisoformat(v) if k in dates and v else v for k, v in zip(FIELDS, row)} for row in rows]
+                    records = [{k: date.fromisoformat(v) if k in dates and v else bool(v) if k in BOOLEAN_FIELDS and v is not None else v for k, v in zip(FIELDS, row)} for row in rows]
                     writer.write_table(pa.Table.from_pylist(records, schema=schema))
                     count += len(rows)
             saved = pq.ParquetFile(run / "all_russia.parquet")

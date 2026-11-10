@@ -1,0 +1,638 @@
+{
+  "version": 1,
+  "chains": [
+    {
+      "id": "pyaterochka",
+      "name": "Пятёрочка",
+      "aliases": [
+        "Пятёрочка",
+        "Пятерочка",
+        "Pyaterochka"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "magnit",
+      "name": "Магнит",
+      "aliases": [
+        "Магнит",
+        "Магнит Косметик",
+        "Magnit"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery",
+        "cosmetics",
+        "beauty",
+        "general",
+        "variety_store",
+        "department_store"
+      ]
+    },
+    {
+      "id": "perekrestok",
+      "name": "Перекрёсток",
+      "aliases": [
+        "Перекресток",
+        "Перекрёсток",
+        "Perekrestok"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "dixy",
+      "name": "Дикси",
+      "aliases": [
+        "Дикси",
+        "Dixy"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "lenta",
+      "name": "Лента",
+      "aliases": [
+        "Лента",
+        "Гипер Лента",
+        "Супер Лента"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "auchan",
+      "name": "Ашан",
+      "aliases": [
+        "Ашан",
+        "Auchan",
+        "Атак"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "okey",
+      "name": "О’КЕЙ",
+      "aliases": [
+        "Окей",
+        "О кей",
+        "O key"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "metro",
+      "name": "METRO",
+      "aliases": [
+        "Metro",
+        "Метро Кэш энд Керри"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "vkusvill",
+      "name": "ВкусВилл",
+      "aliases": [
+        "ВкусВилл",
+        "Vkusvill"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "chizhik",
+      "name": "Чижик",
+      "aliases": [
+        "Чижик"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "svetofor",
+      "name": "Светофор",
+      "aliases": [
+        "Светофор"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "monetka",
+      "name": "Монетка",
+      "aliases": [
+        "Монетка"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "verny",
+      "name": "Верный",
+      "aliases": [
+        "Верный"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "fixprice",
+      "name": "Fix Price",
+      "aliases": [
+        "Fix Price",
+        "FixPrice",
+        "Фикс Прайс"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery",
+        "cosmetics",
+        "beauty",
+        "general",
+        "variety_store",
+        "department_store"
+      ]
+    },
+    {
+      "id": "kb",
+      "name": "Красное & Белое",
+      "aliases": [
+        "Красное Белое",
+        "Красное и Белое",
+        "Красное & Белое"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "bristol",
+      "name": "Бристоль",
+      "aliases": [
+        "Бристоль"
+      ],
+      "name_tags": [
+        "supermarket",
+        "convenience",
+        "general",
+        "department_store",
+        "variety_store",
+        "alcohol",
+        "wine",
+        "health_food",
+        "confectionery"
+      ]
+    },
+    {
+      "id": "ozon",
+      "name": "Ozon",
+      "aliases": [
+        "Ozon",
+        "Озон"
+      ],
+      "name_tags": [
+        "outpost",
+        "parcel_locker"
+      ]
+    },
+    {
+      "id": "wildberries",
+      "name": "Wildberries",
+      "aliases": [
+        "Wildberries",
+        "Вайлдберриз",
+        "Вайлдберис",
+        "Валберис",
+        "WB",
+        "ВБ"
+      ],
+      "name_tags": [
+        "outpost",
+        "parcel_locker"
+      ]
+    },
+    {
+      "id": "yandexmarket",
+      "name": "Яндекс Маркет",
+      "aliases": [
+        "Яндекс Маркет",
+        "Yandex Market"
+      ],
+      "name_tags": [
+        "outpost",
+        "parcel_locker"
+      ]
+    },
+    {
+      "id": "cdek",
+      "name": "СДЭК",
+      "aliases": [
+        "СДЭК",
+        "CDEK"
+      ],
+      "name_tags": [
+        "outpost",
+        "parcel_locker"
+      ]
+    },
+    {
+      "id": "mts",
+      "name": "МТС",
+      "aliases": [
+        "МТС",
+        "MTS"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ],
+      "telecom_operator": true
+    },
+    {
+      "id": "megafon",
+      "name": "МегаФон",
+      "aliases": [
+        "МегаФон",
+        "Мегафон",
+        "Megafon"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ],
+      "telecom_operator": true
+    },
+    {
+      "id": "beeline",
+      "name": "Билайн",
+      "aliases": [
+        "Билайн",
+        "Beeline"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ],
+      "telecom_operator": true
+    },
+    {
+      "id": "t2",
+      "name": "T2",
+      "aliases": [
+        "Теле2",
+        "Теле 2",
+        "Tele2",
+        "T2",
+        "Т2"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ],
+      "telecom_operator": true
+    },
+    {
+      "id": "yota",
+      "name": "Yota",
+      "aliases": [
+        "Yota",
+        "Йота"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ],
+      "telecom_operator": true
+    },
+    {
+      "id": "rostelecom",
+      "name": "Ростелеком",
+      "aliases": [
+        "Ростелеком",
+        "Rostelecom"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ],
+      "telecom_operator": true
+    },
+    {
+      "id": "dns",
+      "name": "DNS",
+      "aliases": [
+        "DNS",
+        "ДНС"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ]
+    },
+    {
+      "id": "mvideo",
+      "name": "М.Видео",
+      "aliases": [
+        "М Видео",
+        "М.Видео",
+        "Mvideo"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ]
+    },
+    {
+      "id": "eldorado",
+      "name": "Эльдорадо",
+      "aliases": [
+        "Эльдорадо",
+        "Eldorado"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ]
+    },
+    {
+      "id": "citilink",
+      "name": "Ситилинк",
+      "aliases": [
+        "Ситилинк",
+        "Citilink"
+      ],
+      "name_tags": [
+        "mobile_phone",
+        "mobile_phone_repair",
+        "telecommunication",
+        "telecom",
+        "electronics",
+        "electronics_repair",
+        "computer",
+        "repair"
+      ]
+    },
+    {
+      "id": "lemanapro",
+      "name": "Лемана ПРО",
+      "aliases": [
+        "Лемана ПРО",
+        "Леруа Мерлен",
+        "Leroy Merlin"
+      ],
+      "name_tags": [
+        "hardware",
+        "houseware",
+        "garden_centre"
+      ]
+    },
+    {
+      "id": "goldapple",
+      "name": "Золотое Яблоко",
+      "aliases": [
+        "Золотое Яблоко"
+      ],
+      "name_tags": [
+        "cosmetics",
+        "beauty",
+        "general",
+        "variety_store",
+        "department_store"
+      ]
+    },
+    {
+      "id": "letoile",
+      "name": "Лэтуаль",
+      "aliases": [
+        "Лэтуаль",
+        "Летуаль",
+        "Л Этуаль"
+      ],
+      "name_tags": [
+        "cosmetics",
+        "beauty",
+        "general",
+        "variety_store",
+        "department_store"
+      ]
+    },
+    {
+      "id": "rivegauche",
+      "name": "Рив Гош",
+      "aliases": [
+        "Рив Гош",
+        "Rive Gauche"
+      ],
+      "name_tags": [
+        "cosmetics",
+        "beauty",
+        "general",
+        "variety_store",
+        "department_store"
+      ]
+    },
+    {
+      "id": "ulybka",
+      "name": "Улыбка радуги",
+      "aliases": [
+        "Улыбка радуги"
+      ],
+      "name_tags": [
+        "cosmetics",
+        "beauty",
+        "general",
+        "variety_store",
+        "department_store"
+      ]
+    }
+  ]
+}

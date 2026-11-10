@@ -16,6 +16,7 @@ from pathlib import Path
 from .config import contract_hash, load_settings
 from .runtime import atomic_json, process_lock, cleanup_index
 from .storage import Registry, check_quality
+from .classification import from_settings
 
 
 def parser():
@@ -146,7 +147,7 @@ def run(args):
                     if not code or row.get("region_code") == code:
                         store.insert(row)
                 parsing = extract_pois(Path(source["path"]), settings["mapping"], settings["name_priority"],
-                                       region_index, emit, review, stage, settings.get("line_policy", "midpoint"))
+                                       region_index, emit, review, stage, settings.get("line_policy", "midpoint"), classifier=from_settings(settings))
             if old_db:
                 old_db.close()
                 old_db = None

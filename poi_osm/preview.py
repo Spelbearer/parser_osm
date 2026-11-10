@@ -16,6 +16,7 @@ from .geography import RegionIndex, prepare_boundaries
 from .runtime import atomic_json
 from .sources import obtain_source
 from .storage import Registry, FIELDS
+from .classification import from_settings
 
 
 class UnassignedIndex:
@@ -77,7 +78,7 @@ def run(args):
                                     delimiter=";", extrasaction="ignore")
             writer.writeheader()
             parsing = extract_pois(source["path"], settings["mapping"], settings["name_priority"], index,
-                                   store.insert, writer.writerow, output / "work", settings.get("line_policy", "midpoint"), strict_geometry=False)
+                                   store.insert, writer.writerow, output / "work", settings.get("line_policy", "midpoint"), strict_geometry=False, classifier=from_settings(settings))
         # Preview has no previous baseline and therefore no change statuses.
         store.db.execute("UPDATE poi SET record_status='PREVIEW'")
         store.db.commit()

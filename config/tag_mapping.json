@@ -19,7 +19,9 @@
     "craft",
     "shop"
   ],
-  "outpost": [],
+  "outpost": [
+    "shop"
+  ],
   "locksmith": [
     "craft",
     "shop"
@@ -107,7 +109,8 @@
     "shop"
   ],
   "mobile_phone": [
-    "shop"
+    "shop",
+    "repair"
   ],
   "food": [],
   "photographic_laboratory": [
@@ -143,5 +146,25 @@
   ],
   "mall": [
     "shop"
+  ],
+  "mobile_phone_repair": [
+    "shop"
+  ],
+  "telecommunication": [
+    "shop",
+    "office"
+  ],
+  "telecom": [
+    "shop"
+  ],
+  "electronics_repair": [
+    "shop",
+    "craft"
+  ],
+  "repair": [
+    "shop"
+  ],
+  "parcel_locker": [
+    "amenity"
   ]
 }
