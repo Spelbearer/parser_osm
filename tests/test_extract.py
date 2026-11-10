@@ -71,6 +71,28 @@ def test_incomplete_relation_aborts_snapshot(tmp_path):
                      lambda r: None, tmp_path / "work")
 
 
+def test_unassembled_way_is_only_quarantined_for_explicit_preview(tmp_path):
+    index, _, _ = boundaries(tmp_path)
+    pbf = tmp_path / "degenerate.osm.pbf"
+    with osmium.SimpleWriter(str(pbf)) as writer:
+        writer.add_node(osmium.osm.mutable.Node(id=1, location=(1,1), tags={"shop":"bakery"}))
+        writer.add_node(osmium.osm.mutable.Node(id=2, location=(2,2)))
+        # Closed but only two distinct vertices: no valid area can be built.
+        writer.add_way(osmium.osm.mutable.Way(id=17, nodes=[1,2,1,2,1], tags={"shop":"bakery"}))
+    with pytest.raises((ValueError, RuntimeError), match="unassembled|invalid area"):
+        extract_pois(pbf, {"bakery":["shop"]}, ["name"], index, lambda row:None,
+                     lambda row:None, tmp_path / "strict")
+    rows, reviews = [], []
+    stats = extract_pois(pbf, {"bakery":["shop"]}, ["name"], index, rows.append,
+                         reviews.append, tmp_path / "preview", strict_geometry=False)
+    assert [(r["osm_type"],r["osm_id"]) for r in rows] == [("node","1")]
+    assert stats["unresolved_objects"] == 1
+    assert stats["skipped_poi_records"] == 1
+    assert reviews[0]["osm_id"] == "17"
+    assert reviews[0]["review_reason"] == "unassembled_geometry"
+    assert json.loads(reviews[0]["detail"])["node_count"] == 5
+
+
 def test_unknown_region_is_retained_for_review(tmp_path):
     index, _, _ = boundaries(tmp_path)
     pbf = tmp_path / "outside.osm.pbf"

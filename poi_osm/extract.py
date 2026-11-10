@@ -27,7 +27,7 @@ def matching_categories(tags: dict, mapping: dict[str, list[str]]):
 
 def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: list[str],
                  region_index, emit, review, work_dir: Path,
-                 line_policy: str = "midpoint") -> dict:
+                 line_policy: str = "midpoint", *, strict_geometry: bool = True) -> dict:
     """Read complete PBF without keeping its objects or coordinates in memory.
 
     Area assembly is delegated to libosmium's multipolygon manager. A separate
@@ -53,6 +53,8 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
         CREATE TABLE needed_ways(id INTEGER PRIMARY KEY, geometry BLOB);
         CREATE TABLE needed_nodes(id INTEGER PRIMARY KEY, geometry BLOB);
         CREATE TABLE pending(kind TEXT, id INTEGER, PRIMARY KEY(kind,id));
+        CREATE TABLE resolved(kind TEXT, id INTEGER, PRIMARY KEY(kind,id));
+        CREATE TABLE way_details(id INTEGER PRIMARY KEY, tags TEXT, detail TEXT);
     """)
     stats = Counter()
     factory = WKBFactory()
@@ -183,6 +185,9 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
                         output("way", way.id, tags, geometry)
                 if selected and is_area:
                     connection.execute("INSERT INTO pending VALUES('way',?)", (way.id,))
+                    connection.execute("INSERT INTO way_details VALUES(?,?,?)", (way.id, json.dumps(tags), json.dumps({
+                        "node_count": len(way.nodes), "missing_node_locations": sum(not n.location.valid() for n in way.nodes)
+                    })))
 
             def relation(self, relation):
                 stats["processed_relations"] += 1
@@ -195,8 +200,18 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
                 # area=no closed ways must retain the configured linear rule.
                 if kind == "way" and tags.get("area") == "no":
                     return
-                geometry = wkb.loads(factory.create_multipolygon(area), hex=True)
+                try:
+                    geometry = wkb.loads(factory.create_multipolygon(area), hex=True)
+                except RuntimeError:
+                    if strict_geometry:
+                        raise
+                    # Leave it pending for the explicit incomplete-preview
+                    # report. Never invent a point for an invalid area.
+                    return
                 output(kind, area.orig_id(), tags, geometry, area=True)
+                # Area callbacks may be buffered or arrive before the original
+                # way callback. Record completion independently of pending.
+                connection.execute("INSERT OR IGNORE INTO resolved VALUES(?,?)", (kind, area.orig_id()))
                 connection.execute("DELETE FROM pending WHERE kind=? AND id=?", (kind, area.orig_id()))
 
         # Unlike SimpleHandler.apply_file(area=...), restrict the area manager's
@@ -212,7 +227,7 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
         handler = Handler()
         area_handler = manager.second_pass_handler(handler)
         with osmium.io.Reader(str(pbf_path), osmium.osm.osm_entity_bits.OBJECT) as reader:
-            osmium.apply(reader, location_handler, area_handler, handler)
+            osmium.apply(reader, location_handler, handler, area_handler)
         # Release mmap and C++ location-handler references before Windows unlink.
         del area_handler, handler, location_handler, node_index, manager
 
@@ -249,9 +264,19 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
             geometry = relation_geometry(relation_id, set())
             output("relation", relation_id, tags, geometry)
             connection.execute("DELETE FROM pending WHERE kind='relation' AND id=?", (relation_id,))
-        unresolved = connection.execute("SELECT kind,id FROM pending LIMIT 10").fetchall()
-        if unresolved:
+        unresolved_query = """SELECT p.kind,p.id,COALESCE(w.tags,r.tags),w.detail FROM pending p
+            LEFT JOIN way_details w ON p.kind='way' AND w.id=p.id
+            LEFT JOIN relations r ON p.kind='relation' AND r.id=p.id
+            WHERE NOT EXISTS(SELECT 1 FROM resolved s WHERE s.kind=p.kind AND s.id=p.id)"""
+        unresolved = connection.execute(unresolved_query + " LIMIT 10").fetchall()
+        if unresolved and strict_geometry:
             raise ValueError(f"Incomplete or unassembled POI geometry; snapshot rejected: {unresolved}")
+        for kind, object_id, tags_json, detail in connection.execute(unresolved_query):
+            stats["unresolved_objects"] += 1
+            for category, _ in matching_categories(json.loads(tags_json or '{}'), mapping):
+                stats["skipped_poi_records"] += 1
+                review({"osm_type": kind, "osm_id": str(object_id), "tag": category,
+                        "review_reason": "unassembled_geometry", "detail": detail or "Area assembly failed"})
         stats["processed_osm_objects"] = sum(stats[k] for k in ("processed_nodes", "processed_ways", "processed_relations"))
         connection.close()
         dependency_path.unlink(missing_ok=True)

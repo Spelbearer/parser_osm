@@ -73,11 +73,11 @@ def run(args):
         store = Registry(output / "preview.sqlite", settings["mapping"], datetime.now(timezone.utc).date().isoformat(),
                          source, settings["batch_size"])
         with (output / "review.csv").open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=["osm_type", "osm_id", "tag", "lon", "lat", "review_reason"],
+            writer = csv.DictWriter(stream, fieldnames=["osm_type", "osm_id", "tag", "lon", "lat", "review_reason", "detail"],
                                     delimiter=";", extrasaction="ignore")
             writer.writeheader()
             parsing = extract_pois(source["path"], settings["mapping"], settings["name_priority"], index,
-                                   store.insert, writer.writerow, output / "work", settings.get("line_policy", "midpoint"))
+                                   store.insert, writer.writerow, output / "work", settings.get("line_policy", "midpoint"), strict_geometry=False)
         # Preview has no previous baseline and therefore no change statuses.
         store.db.execute("UPDATE poi SET record_status='PREVIEW'")
         store.db.commit()
@@ -91,10 +91,11 @@ def run(args):
         store = None
         # No production quality gate: this report is explicitly incomplete,
         # unreviewed, and cannot declare objects deleted or advance state.
-        manifest.update(status="PREVIEW_SUCCESS", metrics=metrics, by_category=categories, parsing=parsing,
+        status = "PREVIEW_INCOMPLETE" if parsing.get("unresolved_objects") else "PREVIEW_SUCCESS"
+        manifest.update(status=status, metrics=metrics, by_category=categories, parsing=parsing,
                         warning="Unreviewed boundaries and unverified completeness. Not a production publication.")
         atomic_json(output / "summary.json", manifest)
-        logging.info("PREVIEW_SUCCESS: %s POI; output=%s", metrics["total"], output)
+        logging.info("%s: %s POI; unresolved=%s; output=%s", status, metrics["total"], parsing.get("unresolved_objects", 0), output)
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return 0
     except Exception as error:
