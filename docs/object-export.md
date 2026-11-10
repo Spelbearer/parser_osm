@@ -24,7 +24,7 @@
 
 - `poi.csv` — все уникальные объекты, включая непривязанные;
 - `poi_objects.parquet` — те же объекты и поля, включая непривязанные;
-- `poi_teradata.csv`, `poi_teradata.parquet` — по одной основной категории на объект, без объединённых `tag`/`category`; [правила приоритетов и схема](teradata.md);
+- `poi_teradata.csv`, `poi_teradata.parquet` — по одной основной категории на объект, только node/way по умолчанию, без объединённых `tag`/`category`; [правила приоритетов и схема](teradata.md);
 - `objects/<region_code>.csv` — уникальные объекты региона;
 - `objects/unassigned.csv` — объекты без однозначного региона;
 - `poi_by_tag.csv` — подробные строки по тегам в режиме preview;

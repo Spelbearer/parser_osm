@@ -79,7 +79,8 @@ def export_objects(db, output: Path, *, parquet=True, batch_size=5000, region_co
         return pa.schema([(k, pa.float64() if k in {"lon", "lat"} else pa.date32() if k in dates else
                           pa.bool_() if k in BOOLEAN_FIELDS else pa.int64() if k == "tag_count" else pa.string()) for k in fields])
     schema, td_schema = arrow_schema(OBJECT_FIELDS), arrow_schema(TERADATA_FIELDS)
-    total = assigned = category_rows = 0
+    total = assigned = category_rows = td_total = 0
+    td_excluded = {}
     counts = {}
     with ExitStack() as stack:
         def csv_writer(path, fields=OBJECT_FIELDS):
@@ -99,14 +100,15 @@ def export_objects(db, output: Path, *, parquet=True, batch_size=5000, region_co
         def flush():
             if batch and writer:
                 writer.write_table(pa.Table.from_pylist(batch, schema=schema))
-                td_writer.write_table(pa.Table.from_pylist(td_batch, schema=td_schema))
+                if td_batch:
+                    td_writer.write_table(pa.Table.from_pylist(td_batch, schema=td_schema))
             batch.clear()
             td_batch.clear()
         def csv_values(row):
             return {k:int(v) if k in BOOLEAN_FIELDS and v is not None else v for k,v in row.items()}
         for row in object_rows(db):
             row = selector.enrich(row)
-            td_row = selector.teradata_row(row)
+            td_row = selector.teradata_row(row) if row["osm_type"] in selector.osm_types else None
             total += 1
             category_rows += row["tag_count"]
             code = row["region_code"] or ""
@@ -119,27 +121,33 @@ def export_objects(db, output: Path, *, parquet=True, batch_size=5000, region_co
             csv_row = csv_values(row)
             all_writer.writerow(csv_row)
             regions[code].writerow(csv_row)
-            td_csv.writerow(csv_values(td_row))
+            if td_row is not None:
+                td_csv.writerow(csv_values(td_row))
+                td_total += 1
+            else:
+                td_excluded[row["osm_type"]] = td_excluded.get(row["osm_type"], 0) + 1
             counts[code] = counts.get(code, 0) + 1
             assigned += bool(code)
             if writer:
                 batch.append({k: date.fromisoformat(v) if k in dates and v else v for k, v in row.items()})
-                td_batch.append({k: date.fromisoformat(v) if k in dates and v else v for k,v in td_row.items()})
+                if td_row is not None:
+                    td_batch.append({k: date.fromisoformat(v) if k in dates and v else v for k,v in td_row.items()})
                 if len(batch) >= batch_size:
                     flush()
         flush()
-    for filename, fields in [("poi.csv",OBJECT_FIELDS), ("poi_teradata.csv",TERADATA_FIELDS)]:
+    for filename, fields, expected_count in [("poi.csv",OBJECT_FIELDS,total), ("poi_teradata.csv",TERADATA_FIELDS,td_total)]:
         with (output / filename).open(encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream, delimiter=";")
-            if reader.fieldnames != fields or sum(1 for _ in reader) != total:
+            if reader.fieldnames != fields or sum(1 for _ in reader) != expected_count:
                 raise ValueError(f"CSV count/schema verification failed: {filename}")
     if parquet:
-        for filename, expected in [("poi_objects.parquet",schema), ("poi_teradata.parquet",td_schema)]:
+        for filename, expected, expected_count in [("poi_objects.parquet",schema,total), ("poi_teradata.parquet",td_schema,td_total)]:
             with pq.ParquetFile(output / filename) as saved:
-                if saved.schema_arrow != expected or sum(b.num_rows for b in saved.iter_batches(batch_size=batch_size)) != total:
+                if saved.schema_arrow != expected or sum(b.num_rows for b in saved.iter_batches(batch_size=batch_size)) != expected_count:
                     raise ValueError(f"Parquet verification failed: {filename}")
     return {"unique_objects": total, "category_rows": category_rows, "extra_category_rows": category_rows - total,
-            "assigned_objects": assigned, "by_region_objects": counts, "primary_rules_sha256": selector.fingerprint}
+            "assigned_objects": assigned, "by_region_objects": counts, "primary_rules_sha256": selector.fingerprint,
+            "teradata_objects": td_total, "teradata_osm_types": list(selector.osm_types), "teradata_excluded_by_type": td_excluded}
 
 
 def main(argv=None):

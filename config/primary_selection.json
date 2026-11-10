@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "teradata_osm_types": ["node", "way"],
   "description": "Выбор одной основной категории для Teradata. Сначала выбираются только строки is_telecom=1, если они есть. Внутри телефонии сначала учитывается telecom_type_priority, затем telecom_tag_priority. Если телефонии нет — other_tag_priority. Чем раньше значение в списке, тем выше приоритет. Неуказанные значения выбираются последними в алфавитном порядке. Исходные теги не удаляются.",
   "telecom_type_priority": ["Ремонт телефонов"],
   "telecom_tag_priority": [

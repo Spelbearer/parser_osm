@@ -20,6 +20,9 @@ class PrimarySelector:
         self.rules = rules if rules is not None else json.loads((CONFIG / "primary_selection.json").read_text(encoding="utf-8"))
         if not isinstance(self.rules, dict):
             raise ValueError("Primary selection configuration must be a JSON object")
+        self.osm_types = self.rules.get("teradata_osm_types", ["node", "way"])
+        if not isinstance(self.osm_types, list) or not self.osm_types or any(not isinstance(t, str) or t not in {"node", "way", "relation"} for t in self.osm_types) or len(self.osm_types) != len(set(self.osm_types)):
+            raise ValueError("teradata_osm_types must contain unique valid OSM types")
         self.ranks = {}
         for key in ("telecom_type_priority", "telecom_tag_priority", "other_tag_priority"):
             values = self.rules.get(key)

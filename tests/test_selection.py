@@ -7,8 +7,10 @@ import pyarrow.parquet as pq
 import pytest
 
 from poi_osm.selection import PrimarySelector, TERADATA_FIELDS
-from poi_osm.objects import collapse
+from poi_osm.objects import collapse, export_objects
+from poi_osm.storage import Registry
 from test_objects import full_row
+from test_storage import row
 from test_pipeline import project, invoke, manifest, csv_rows, configure, write_json, replace_snapshot
 
 
@@ -122,3 +124,37 @@ def test_real_multicategory_telecom_object_has_one_warehouse_row(project):
     assert len(parquet) == 1 and parquet[0]['is_telecom'] is True
     assert report['metrics']['category_rows'] == 2
     assert report['metrics']['unique_objects'] == 1
+
+
+@pytest.mark.parametrize('only_relations', [False, True])
+def test_relations_are_excluded_only_from_teradata_export(tmp_path, only_relations):
+    store = Registry(tmp_path/'registry.sqlite', {'bakery':['shop']},'2026-11-11',
+                     {'source_date':'2026-11-11','path':'fixture.osm.pbf'})
+    types = ['relation'] if only_relations else ['node','way','relation']
+    for typ in types:
+        store.insert(row(osm_type=typ))
+    store.compare(None)
+    output = tmp_path/'export'
+    report = export_objects(store.db,output,batch_size=1)
+    assert {r['osm_type'] for r in csv_rows(output/'poi.csv')} == set(types)
+    assert report['unique_objects'] == len(types)
+    assert report['teradata_objects'] == len(types)-1
+    assert report['teradata_excluded_by_type'] == {'relation':1}
+    expected = set(types)-{'relation'}
+    assert {r['osm_type'] for r in csv_rows(output/'poi_teradata.csv')} == expected
+    assert {r['osm_type'] for r in pq.read_table(output/'poi_teradata.parquet').to_pylist()} == expected
+    assert store.db.execute("SELECT COUNT(*) FROM poi WHERE osm_type='relation'").fetchone()[0] == 1
+    # Explicitly restoring relation is possible without re-parsing or deleting
+    # source data; defaults remain node+way.
+    rules = dict(PrimarySelector().rules, teradata_osm_types=['node','way','relation'])
+    restored = tmp_path/'restored'
+    export_objects(store.db,restored,selection_rules=rules)
+    assert {r['osm_type'] for r in csv_rows(restored/'poi_teradata.csv')} == set(types)
+    store.close()
+
+
+@pytest.mark.parametrize('types',[[],['rel'],['node','node'],[{}]])
+def test_invalid_warehouse_type_filter_is_rejected(types):
+    rules = dict(PrimarySelector().rules,teradata_osm_types=types)
+    with pytest.raises(ValueError,match='teradata_osm_types'):
+        PrimarySelector(rules)

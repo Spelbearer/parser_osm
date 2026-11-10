@@ -102,6 +102,8 @@ python main.py --mode full --duplicates
 
 Для загрузки в Teradata создаются отдельные **`poi_teradata.csv` и `poi_teradata.parquet`**: одна строка на объект, единственные `primary_tag`, `primary_category`, `primary_subcategory`, а все исходные теги — в `all_tags`. Если есть телефония, выбирается она; порядок задаёт `config/primary_selection.json`. Основная категория не входит в ключ MERGE. [Правила и новая схема Teradata](docs/teradata.md).
 
+В файлах Teradata по умолчанию оставлены только **node и way**; relation исключены настройкой `teradata_osm_types` в том же справочнике. Полный реестр, общий `poi.csv` и чтение геометрий/границ сохраняют все типы. В отчёте `teradata_objects` — число строк для загрузки, `teradata_excluded_by_type` — исключённые объекты.
+
 Для адресной программы в каждый CSV/Parquet добавлены `category`, `subcategory`, `is_telecom`, `telecom_type`, `chain_name`, `chain_id`, `is_chain` и поля происхождения классификации. Исходные `tag`, `osm_key`, `osm_value` сохраняются. [Справочники и примеры фильтров](docs/business-filters.md) объясняют, как выделить телефонию и исключить распознанные сети. Новые поля появляются после повторной обработки PBF; существующие CSV автоматически не переписываются.
 
 Все базовые группы и подкатегории редактируются в `config/categories.json`. Отдельный `config/telecom.json` содержит прямые и косвенные направления телефонии; `electronics`, `electronics_repair`, `computer`, `repair` по умолчанию включены в неё с пометкой косвенной связи. Список сетей редактируется в `config/chains.json`. Python-код для изменения этих справочников править не нужно.

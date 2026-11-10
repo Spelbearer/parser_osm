@@ -1,6 +1,8 @@
 -- Проект SQL для нового объектного формата poi_teradata.csv/parquet.
 -- Проверить на целевой версии Teradata. Старую таблицу с ключом по TAG
 -- нужно мигрировать отдельно с сохранением данных; этот файл её не удаляет.
+-- Выходной профиль по умолчанию содержит node и way; relations исключены
+-- из poi_teradata.csv/parquet. Уже загруженные relations MERGE не удаляет.
 CREATE MULTISET TABLE SBX_OPERATION.OSM_POI
 (
     "OSM_TYPE" VARCHAR(20) CHARACTER SET UNICODE NOT NULL,
@@ -50,6 +52,13 @@ SELECT "OSM_TYPE", "OSM_ID", COUNT(*) AS ROW_COUNT
 FROM SBX_OPERATION.OSM_POI_STAGE
 GROUP BY "OSM_TYPE", "OSM_ID"
 HAVING COUNT(*) > 1;
+
+-- Для профиля node+way результат также должен быть пустым.
+-- При изменении teradata_osm_types согласовать эту проверку с профилем.
+SELECT "OSM_TYPE", COUNT(*) AS ROW_COUNT
+FROM SBX_OPERATION.OSM_POI_STAGE
+WHERE "OSM_TYPE" NOT IN ('node', 'way')
+GROUP BY "OSM_TYPE";
 
 -- Загружать полный объектный экспорт выбранного успешного запуска,
 -- а не категорийную delta/. Смена основной категории обновляет ту же строку.
