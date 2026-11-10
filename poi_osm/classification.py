@@ -8,8 +8,6 @@ from functools import lru_cache
 from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
-PHONE_TAGS = {"mobile_phone", "mobile_phone_repair", "telecommunication", "telecom"}
-PHONE_CONTEXT = PHONE_TAGS | {"electronics", "electronics_repair", "computer", "repair"}
 PHONE_WORDS = re.compile(r"(?:ремонт\w*\s+(?:мобильн\w*\s+)?(?:телефон\w*|смартфон\w*|iphone)|(?:телефон\w*|смартфон\w*|iphone)\s+ремонт\w*|салон\s+связи|ремонт\s+сотов\w*)", re.I)
 
 
@@ -18,10 +16,25 @@ def normalize(value):
 
 
 class Classifier:
-    def __init__(self, categories: dict, chains: dict):
+    def __init__(self, categories: dict, chains: dict, telecom: dict | None = None):
         if not isinstance(categories.get("tags"), dict) or not isinstance(chains.get("chains"), list):
             raise ValueError("Invalid category or chain dictionary")
         self.categories, self.chains = categories, chains
+        self.telecom = telecom if telecom is not None else json.loads((CONFIG / "telecom.json").read_text(encoding="utf-8"))
+        if not isinstance(self.telecom.get("category"), str) or not self.telecom["category"]:
+            raise ValueError("Telecom category must be a nonempty string")
+        for group in ("direct_tags", "indirect_tags"):
+            values = self.telecom.get(group)
+            if not isinstance(values, dict) or any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in values.items()):
+                raise ValueError(f"Telecom {group} must map tag values to nonempty labels")
+        if self.telecom["direct_tags"].keys() & self.telecom["indirect_tags"].keys():
+            raise ValueError("Telecom direct and indirect tags must not overlap")
+        self.phone_context = self.telecom["direct_tags"].keys() | self.telecom["indirect_tags"].keys()
+        self.phone_labels = {"phone_repair":"Ремонт телефонов", "salon":"Салон связи", "office":"Офис связи"}
+        labels = self.telecom.get("labels", {})
+        if not isinstance(labels, dict) or any(not isinstance(v, str) or not v for v in labels.values()):
+            raise ValueError("Telecom labels must be nonempty strings")
+        self.phone_labels.update(labels)
         for tag, definition in categories["tags"].items():
             if not isinstance(definition, dict) or any(not isinstance(definition.get(k), str) or not definition[k] for k in ("category", "subcategory")):
                 raise ValueError(f"Category/subcategory missing for {tag}")
@@ -48,18 +61,21 @@ class Classifier:
                              or tag == "mobile_phone_repair")
         telecom_type = None
         evidence = None
-        if tag in PHONE_CONTEXT:
+        if tag in self.phone_context:
             if structured_repair:
-                telecom_type, evidence = "Ремонт телефонов", "osm_tags"
-            elif PHONE_WORDS.search(text):
-                telecom_type, evidence = ("Ремонт телефонов" if "ремонт" in text else "Салон связи"), "name_hint"
-            elif tag in PHONE_TAGS:
-                telecom_type = "Офис связи" if tags.get("office") == tag else "Салон связи и мобильные телефоны"
+                telecom_type = self.telecom["direct_tags"].get(tag, self.phone_labels["phone_repair"]) if tag == "mobile_phone_repair" else self.phone_labels["phone_repair"]
                 evidence = "osm_tags"
+            elif PHONE_WORDS.search(text):
+                telecom_type, evidence = self.phone_labels["phone_repair" if "ремонт" in text else "salon"], "name_hint"
+            elif tag in self.telecom["direct_tags"]:
+                telecom_type = self.phone_labels["office"] if tags.get("office") == tag else self.telecom["direct_tags"][tag]
+                evidence = "osm_tags"
+            else:
+                telecom_type, evidence = self.telecom["indirect_tags"][tag], "configured_indirect"
         result.update(is_telecom=telecom_type is not None, telecom_type=telecom_type, telecom_evidence=evidence,
                       brand=tags.get("brand"), operator=tags.get("operator"))
         if telecom_type:
-            result.update(category="Телефония и связь", subcategory=telecom_type)
+            result.update(category=self.telecom["category"], subcategory=telecom_type)
         # Structured brand/operator evidence has priority over names. Multiple
         # brands at one level remain a conflict rather than an arbitrary pick.
         for keys, confidence in [(('brand',), 'brand'), (('operator',), 'operator'),
@@ -80,9 +96,9 @@ class Classifier:
                     chain, key = next(iter(hits.values()))
                     result.update(is_chain=True, chain_id=chain["id"], chain_name=chain["name"],
                                   chain_status="identified", chain_evidence=f"{confidence}:{key}")
-                    if chain.get("telecom_operator") and not telecom_type and tag in PHONE_CONTEXT:
-                        result.update(is_telecom=True, telecom_type="Салон связи", telecom_evidence=f"chain_{confidence}",
-                                      category="Телефония и связь", subcategory="Салон связи")
+                    if chain.get("telecom_operator") and (not telecom_type or evidence == "configured_indirect") and tag in self.phone_context:
+                        result.update(is_telecom=True, telecom_type=self.phone_labels["salon"], telecom_evidence=f"chain_{confidence}",
+                                      category=self.telecom["category"], subcategory=self.phone_labels["salon"])
                 break
         else:
             result.update(is_chain=None, chain_id=None, chain_name=None, chain_status="not_identified", chain_evidence=None)
@@ -92,8 +108,9 @@ class Classifier:
 @lru_cache(maxsize=1)
 def default_classifier():
     return Classifier(json.loads((CONFIG / "categories.json").read_text(encoding="utf-8")),
-                      json.loads((CONFIG / "chains.json").read_text(encoding="utf-8")))
+                      json.loads((CONFIG / "chains.json").read_text(encoding="utf-8")),
+                      json.loads((CONFIG / "telecom.json").read_text(encoding="utf-8")))
 
 
 def from_settings(settings):
-    return Classifier(settings["category_rules"], settings["chain_rules"])
+    return Classifier(settings["category_rules"], settings["chain_rules"], settings["telecom_rules"])

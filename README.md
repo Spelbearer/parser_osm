@@ -100,6 +100,8 @@ python main.py --mode full --duplicates
 
 Для адресной программы в каждый CSV/Parquet добавлены `category`, `subcategory`, `is_telecom`, `telecom_type`, `chain_name`, `chain_id`, `is_chain` и поля происхождения классификации. Исходные `tag`, `osm_key`, `osm_value` сохраняются. [Справочники и примеры фильтров](docs/business-filters.md) объясняют, как выделить телефонию и исключить распознанные сети. Новые поля появляются после повторной обработки PBF; существующие CSV автоматически не переписываются.
 
+Все базовые группы и подкатегории редактируются в `config/categories.json`. Отдельный `config/telecom.json` содержит прямые и косвенные направления телефонии; `electronics`, `electronics_repair`, `computer`, `repair` по умолчанию включены в неё с пометкой косвенной связи. Список сетей редактируется в `config/chains.json`. Python-код для изменения этих справочников править не нужно.
+
 Каталоги генерируются относительно `project_root`:
 
 ```text

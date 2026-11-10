@@ -18,10 +18,10 @@ def load_settings(path: Path) -> dict:
     if settings.get("input"):
         settings["input"]["path"] = str((root / settings["input"]["path"]).resolve())
     settings["mapping"] = json.loads(Path(settings["tag_mapping"]).read_text(encoding="utf-8"))
-    for name, filename, target in [("categories", "categories.json", "category_rules"), ("chains", "chains.json", "chain_rules")]:
+    for name, filename, target in [("categories", "categories.json", "category_rules"), ("chains", "chains.json", "chain_rules"), ("telecom", "telecom.json", "telecom_rules")]:
         rule_path = (root / settings[name]).resolve() if settings.get(name) else CONFIG / filename
         settings[target] = json.loads(rule_path.read_text(encoding="utf-8"))
-    Classifier(settings["category_rules"], settings["chain_rules"])
+    Classifier(settings["category_rules"], settings["chain_rules"], settings["telecom_rules"])
     mapping = settings["mapping"]
     if not isinstance(mapping, dict) or not mapping:
         raise ValueError("tag_mapping must be a nonempty category -> keys object")
@@ -52,5 +52,5 @@ def contract_hash(settings: dict, registry: dict, boundary_hash: str) -> str:
                 "boundaries": boundary_hash, "name_priority": settings["name_priority"],
                 "line_policy": settings.get("line_policy", "midpoint"),
                 "coverage_id": settings["coverage_id"]}
-    contract.update(schema_version=2, categories=settings.get("category_rules"), chains=settings.get("chain_rules"))
+    contract.update(schema_version=2, categories=settings.get("category_rules"), chains=settings.get("chain_rules"), telecom=settings.get("telecom_rules"))
     return hashlib.sha256(json.dumps(contract, ensure_ascii=False, sort_keys=True).encode()).hexdigest()

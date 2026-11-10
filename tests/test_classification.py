@@ -124,3 +124,54 @@ def test_invalid_taxonomy_and_chain_aliases_rejected():
         Classifier({'tags':{'bakery':{'category':'Продукты'}}}, {'chains':[]})
     with pytest.raises(ValueError, match='list of strings'):
         Classifier({'tags':{}}, {'chains':[{'id':'x','name':'X','aliases':'wrong'}]})
+
+
+@pytest.mark.parametrize('tag', ['electronics','electronics_repair','computer','repair'])
+def test_indirect_directions_are_telecom_without_name_hints(tag):
+    row = default_classifier().classify({}, tag)
+    assert row['is_telecom'] is True
+    assert row['category'] == 'Телефония и связь'
+    assert row['telecom_evidence'] == 'configured_indirect'
+    assert 'косвенная связь' in row['telecom_type']
+
+
+def test_editing_telecom_dictionary_changes_membership_and_labels():
+    source = default_classifier()
+    rules = json.loads((CONFIG / 'telecom.json').read_text(encoding='utf-8'))
+    del rules['indirect_tags']['computer']
+    rules['indirect_tags']['bakery'] = 'Мой дополнительный сегмент'
+    rules['category'] = 'Моя целевая группа'
+    classifier = Classifier(source.categories, source.chains, rules)
+    assert classifier.classify({}, 'computer')['is_telecom'] is False
+    row = classifier.classify({}, 'bakery')
+    assert row['is_telecom'] is True
+    assert row['telecom_type'] == 'Мой дополнительный сегмент'
+    assert row['category'] == 'Моя целевая группа'
+
+
+def test_custom_telecom_file_is_used_by_cli(project):
+    rules = {'category':'Мой сегмент', 'direct_tags':{}, 'indirect_tags':{'bakery':'Пекарни для кампании'}}
+    path = project / 'config/my_telecom.json'
+    write_json(path, rules)
+    configure(project, telecom='config/my_telecom.json')
+    invoke(project)
+    table = pq.read_table(Path(manifest(project)['output']) / 'all_russia.parquet')
+    bakery = [r for r in table.to_pylist() if r['tag'] == 'bakery']
+    assert all(r['is_telecom'] is True and r['telecom_type'] == 'Пекарни для кампании' for r in bakery)
+
+
+def test_telecom_rules_reject_overlapping_membership():
+    source = default_classifier()
+    with pytest.raises(ValueError, match='overlap'):
+        Classifier(source.categories, source.chains, {'category':'Связь', 'direct_tags':{'computer':'Прямой'},
+                                                    'indirect_tags':{'computer':'Косвенный'}})
+
+
+def test_specific_telecom_labels_are_editable():
+    source = default_classifier()
+    rules = json.loads((CONFIG / 'telecom.json').read_text(encoding='utf-8'))
+    rules['labels']['phone_repair'] = 'Мастерские смартфонов'
+    classifier = Classifier(source.categories, source.chains, rules)
+    row = classifier.classify({'mobile_phone:repair':'yes'}, 'electronics')
+    assert row['telecom_type'] == 'Мастерские смартфонов'
+    assert row['telecom_evidence'] == 'osm_tags'
