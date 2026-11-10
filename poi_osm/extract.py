@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import osmium
+from .runtime import cleanup_index
 from osmium.geom import WKBFactory
 from shapely import transform, wkb
 from shapely.geometry import Point
@@ -40,7 +41,11 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
     work_dir.mkdir(parents=True, exist_ok=True)
     token = uuid4().hex
     dependency_path = work_dir / f"geometry-{token}.sqlite"
-    index_path = work_dir / f"locations-{token}.idx"
+    # Native map handles can remain open on Windows until process exit. Keep
+    # these disposable files outside the directory atomically published later.
+    index_dir = work_dir.parent / "indexes"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    index_path = index_dir / f"locations-{token}.idx"
     connection = sqlite3.connect(dependency_path)
     connection.executescript("""
         PRAGMA cache_size=-32768;
@@ -250,7 +255,7 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
         stats["processed_osm_objects"] = sum(stats[k] for k in ("processed_nodes", "processed_ways", "processed_relations"))
         connection.close()
         dependency_path.unlink(missing_ok=True)
-        index_path.unlink(missing_ok=True)
+        cleanup_index(index_path)
         return dict(stats)
     except BaseException:
         connection.close()

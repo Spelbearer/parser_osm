@@ -1,9 +1,25 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
+
+
+def cleanup_index(path: Path):
+    """Delete a disposable index, deferring only Windows sharing violations.
+
+    libosmium's named file map can retain its native descriptor until process
+    exit. This is independent of whether parsing succeeded. Never suppress
+    permission errors or I/O failures for application data.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        if getattr(error, "winerror", None) not in {32, 33}:
+            raise
+        logging.warning("Index still held by libosmium; cleanup deferred until process exit/next run: %s", path)
 
 
 @contextmanager

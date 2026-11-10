@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from uuid import uuid4
+from .runtime import cleanup_index
 
 from shapely.geometry import Point, mapping, shape
 from shapely.strtree import STRtree
@@ -96,7 +97,9 @@ def prepare_boundaries(pbf_path: Path, output_path: Path, work_dir: Path) -> dic
     output_path = Path(output_path)
     temporary = output_path.with_name(output_path.name + ".partial")
     factory = WKBFactory()
-    index = work_dir / f"boundaries-{uuid4().hex}.idx"
+    index_dir = work_dir.parent / "indexes"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    index = index_dir / f"boundaries-{uuid4().hex}.idx"
     count = 0
     seen = set()
     with temporary.open("w", encoding="utf-8") as stream:
@@ -136,5 +139,5 @@ def prepare_boundaries(pbf_path: Path, output_path: Path, work_dir: Path) -> dic
     if not count:
         raise ValueError("No administrative RU admin_level=4 polygons found")
     temporary.replace(output_path)
-    index.unlink(missing_ok=True)
+    cleanup_index(index)
     return {"candidate_regions": count, "review_required": True}

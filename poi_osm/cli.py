@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import contract_hash, load_settings
-from .runtime import atomic_json, process_lock
+from .runtime import atomic_json, process_lock, cleanup_index
 from .storage import Registry, check_quality
 
 
@@ -95,6 +95,8 @@ def run(args):
         logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", handlers=handlers, force=True)
         started = time.monotonic()
         logging.info("START mode=%s region=%s", args.mode, code or "ALL")
+        for stale_index in (root / "work" / "temporary" / "indexes").glob("*.idx"):
+            cleanup_index(stale_index)
         if args.mode == "incremental":
             logging.info("INCREMENTAL uses complete-snapshot comparison; replication diffs are not applied")
         stage = root / "work" / "temporary" / run_id
@@ -188,6 +190,11 @@ def run(args):
 
 
 def main(argv=None):
+    # Pipes on Windows otherwise use a local code page, while callers decode
+    # JSON and diagnostics as UTF-8. pythonw legitimately has no streams.
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     args = parser().parse_args(argv)
     try:
         return run(args)

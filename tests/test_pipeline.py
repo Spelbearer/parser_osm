@@ -104,7 +104,7 @@ def invoke(root, *args, succeeds=True):
     result = subprocess.run([sys.executable, str(ENTRYPOINT), "--config", str(root / "config/settings.json"), *args],
                             cwd=root.parent, text=True, encoding="utf-8", capture_output=True, timeout=30)
     if succeeds:
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 0, (result.stdout or "") + (result.stderr or "")
     else:
         assert result.returncode != 0, "Failure case unexpectedly published data"
     return result
