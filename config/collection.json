@@ -1,0 +1,8 @@
+{
+  "coverage_id": "ru-internationally-recognized",
+  "expected_extracts": ["central-fed-district", "far-eastern-fed-district", "north-caucasus-fed-district", "northwestern-fed-district", "siberian-fed-district", "south-fed-district", "ural-fed-district", "volga-fed-district"],
+  "excluded_extracts": ["crimean-fed-district"],
+  "complete_snapshot_confirmed": false,
+  "max_rows_per_region_file": 50000,
+  "max_age_days": 45
+}

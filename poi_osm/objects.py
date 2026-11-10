@@ -169,7 +169,7 @@ def main(argv=None):
             source_manifest = path.parent / "manifest.json"
         source_info = json.loads(source_manifest.read_text(encoding="utf-8")) if source_manifest.exists() else {}
         source_status = source_info.get("status", "UNKNOWN")
-        if source_status not in {"UNKNOWN", "PREVIEW_SUCCESS", "PREVIEW_INCOMPLETE", "SUCCESS"}:
+        if source_status not in {"UNKNOWN", "PREVIEW_SUCCESS", "PREVIEW_INCOMPLETE", "SUCCESS", "COLLECTION_PREVIEW_SUCCESS", "COLLECTION_PREVIEW_INCOMPLETE"}:
             raise ValueError("Source run did not complete; do not export its partial registry")
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
             rules = json.loads(args.priority_config.read_text(encoding="utf-8")) if args.priority_config else None

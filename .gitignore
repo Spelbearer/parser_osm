@@ -10,4 +10,5 @@ state/
 logs/
 demo/
 preview/
+russia_output/
 *.egg-info/

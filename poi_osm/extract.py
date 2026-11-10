@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import sqlite3
 from collections import Counter
@@ -161,6 +162,8 @@ def extract_pois(pbf_path: Path, mapping: dict[str, list[str]], name_priority: l
         class Handler(osmium.SimpleHandler):
             def node(self, node):
                 stats["processed_nodes"] += 1
+                if stats["processed_nodes"] % 1000000 == 0:
+                    logging.info("PARSING PROGRESS nodes=%s ways=%s POI rows=%s",stats["processed_nodes"],stats["processed_ways"],stats["poi_records"])
                 tags = dict(node.tags)
                 selected = selected_tags(tags)
                 needed = has_needed_nodes and connection.execute("SELECT 1 FROM needed_nodes WHERE id=?", (node.id,)).fetchone()

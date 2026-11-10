@@ -122,6 +122,8 @@ def prepare_boundaries(pbf_path: Path, output_path: Path, work_dir: Path) -> dic
                 if code in seen:
                     raise ValueError(f"Duplicate administrative area {code}; review the source")
                 geometry = wkb.loads(factory.create_multipolygon(area), hex=True)
+                from .collection_boundaries import split_dateline
+                geometry = split_dateline(geometry)
                 if not geometry.is_valid or geometry.is_empty:
                     raise ValueError(f"Invalid administrative area {code}")
                 feature = {"type": "Feature", "properties": {

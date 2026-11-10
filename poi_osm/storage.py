@@ -33,7 +33,7 @@ class Registry:
         self.mapping, self.date, self.source = mapping, date, source
         self.batch_size, self.pending = batch_size, 0
 
-    def insert(self, row: dict):
+    def insert(self, row: dict, *, source_file: str | None = None):
         row = dict(row)
         if "category" not in row:
             row.update(default_classifier().classify({row.get("osm_key", ""): row.get("osm_value", ""),
@@ -49,7 +49,7 @@ class Registry:
         if geom.geom_type != "Point" or not geom.is_valid or abs(geom.x - lon) > 1e-7 or abs(geom.y - lat) > 1e-7:
             raise ValueError("Invalid or inconsistent WKT")
         row.update(update_date=self.date, source_date=self.source["source_date"],
-                   source_file=Path(self.source["path"]).name, first_seen_date=self.date,
+                   source_file=source_file or Path(self.source["path"]).name, first_seen_date=self.date,
                    last_seen_date=self.date, record_status="NEW")
         fingerprint = hashlib.sha256(json.dumps({k: row.get(k) for k in CONTENT}, sort_keys=True,
                                                  ensure_ascii=False).encode()).hexdigest()
