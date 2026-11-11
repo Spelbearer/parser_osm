@@ -12,3 +12,6 @@ demo/
 preview/
 russia_output/
 *.egg-info/
+.work/
+.product.lock
+.swap.json

@@ -51,9 +51,10 @@ def config(tmp_path,**overrides):
 
 def kml_nodes(report,kind):
     result=[]
-    for entry in report['files']:
-        if entry['kind']==kind:
-            result.extend(ET.parse(Path(report['output'])/entry['file']).findall('.//{'+NS+'}Placemark'))
+    with zipfile.ZipFile(report['archive']) as archive:
+        for entry in report['files']:
+            if entry['kind']==kind:
+                result.extend(ET.fromstring(archive.read(entry['file'])).findall('.//{'+NS+'}Placemark'))
     return result
 
 
@@ -68,6 +69,8 @@ def test_named_points_circles_and_zip_with_split_files(tmp_path):
     assert report['counts']['unnamed_excluded']==1
     assert report['counts']['unassigned_excluded']==1
     assert all(f['features']<=2 for f in report['files'])
+    assert not list(Path(report['output']).rglob('*.kml'))
+    assert not (tmp_path/'out/work').exists()
     assert len(kml_nodes(report,'circles'))==5
     points=kml_nodes(report,'points')
     assert len(points)==6
@@ -129,6 +132,8 @@ def test_failure_retains_previous_zip_and_pointer(tmp_path):
         build(root,output,config(tmp_path))
     assert (output/'last_success.json').read_bytes()==old
     assert Path(report['archive']).is_file()
+    assert not (output/'work').exists()
+    assert (output/'last_failure.json').is_file()
 
 
 @pytest.mark.parametrize('field,value',[('radius_m',0),('radius_m',True),('min_count',0),('count_mode','bad'),

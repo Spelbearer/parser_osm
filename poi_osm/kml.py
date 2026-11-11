@@ -10,6 +10,7 @@ import logging
 import math
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import sys
 import uuid
@@ -197,7 +198,7 @@ def load(source, db, config, names):
     return stats
 
 
-def build(run, output_root, config_path):
+def build(run, output_root, config_path, *, keep_unpacked=False, source_reference=None):
     run = Path(run).resolve()
     config = validate(json.loads(Path(config_path).read_text(encoding='utf-8-sig')))
     info = json.loads((run/'summary.json').read_text(encoding='utf-8-sig'))
@@ -272,9 +273,10 @@ def build(run, output_root, config_path):
                 node.clear()
             if seen!=file['features']: raise ValueError('KML feature count verification failed')
         if _hash_file(source)!=source_hash: raise ValueError('Source CSV changed during KML generation')
-        report = {'status':'KML_EXPORT_SUCCESS','source_run':str(run),'source_status':info['status'],
+        report = {'status':'KML_EXPORT_SUCCESS','source_run':str(source_reference or run),'source_status':info['status'],
                   'source_csv_sha256':source_hash,'output':str(destination),'archive':str(archive_path),
                   'config':config,'counts':dict(stats),'files':layers.files,'file_checks_ok':True,
+                  'layers_kept':bool(keep_unpacked),'layer_paths':'ZIP entries',
                   'license':'ODbL-1.0; © OpenStreetMap contributors',
                   'semantics':'WGS84 distances; named eligible objects; center included; strict radius; circles may overlap or cross regional borders; membership is not clipped by region.'}
         atomic_json(stage/'summary.json',report)
@@ -290,11 +292,17 @@ def build(run, output_root, config_path):
         db.close(); db_path.unlink()
         destination.parent.mkdir(parents=True,exist_ok=True);stage.replace(destination)
         (destination/'archive.zip.partial').replace(archive_path)
+        if not keep_unpacked: shutil.rmtree(destination/'layers')
         atomic_json(output_root/'last_success.json',report)
+        try: (output_root/'work').rmdir()
+        except OSError: pass
         return report
     except BaseException as error:
         layers.close();db.close()
-        if stage.exists(): atomic_json(stage/'summary.json',{'status':'FAILED','error':str(error),'source_run':str(run)})
+        atomic_json(output_root/'last_failure.json',{'status':'FAILED','error':str(error),'source_run':str(run)})
+        if stage.exists(): shutil.rmtree(stage)
+        try: (output_root/'work').rmdir()
+        except OSError: pass
         raise
 
 
@@ -303,9 +311,10 @@ def main(argv=None):
     parser.add_argument('run',type=Path,help='Completed internal run or reduced Teradata package')
     parser.add_argument('--output',type=Path,required=True,help='Local folder in which ZIP archives and run reports are saved')
     parser.add_argument('--config',type=Path,default=CONFIG/'kml.json')
+    parser.add_argument('--keep-unpacked',action='store_true',help='Keep unpacked KML only for explicit debugging')
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,format='%(asctime)s | %(levelname)s | %(message)s')
-    report = build(args.run,args.output,args.config)
+    report = build(args.run,args.output,args.config,keep_unpacked=args.keep_unpacked)
     print(json.dumps(report,ensure_ascii=False,indent=2))
     return 0
 
