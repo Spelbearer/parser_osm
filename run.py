@@ -1,5 +1,6 @@
 """Основной скрипт POI: python run.py --root D:\\osm_results [--adopt | --files]."""
 import logging
+
 from poi_osm.product import main
 
 if __name__ == '__main__':

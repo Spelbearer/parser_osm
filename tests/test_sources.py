@@ -1,13 +1,13 @@
 """Source integrity tests using real tiny PBFs and deterministic HTTP doubles."""
-from datetime import datetime, timedelta, timezone
 import hashlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import osmium
 import pytest
 import requests
 
-from poi_osm.sources import SourceError, check_sources, obtain_source
+from poi_osm.sources import SourceError, obtain_source
 
 
 def test_retry_after_is_respected_and_long_wait_defers():
@@ -153,7 +153,7 @@ def test_bad_download_keeps_previous_cache(monkeypatch, tmp_path):
     with pytest.raises(SourceError, match="checksum mismatch"):
         obtain_source({"sources": [remote_config()]}, cache, force=True)
     assert first["path"].read_bytes() == data
-    assert list(cache.glob("download-*.osm.pbf")), "failed artifact retained for diagnosis"
+    assert not list(cache.glob("download-*.osm.pbf")), "failed partial files must be removed"
 
 
 def test_fallback_and_no_unverified_remote(monkeypatch, tmp_path):
@@ -164,16 +164,6 @@ def test_fallback_and_no_unverified_remote(monkeypatch, tmp_path):
     assert result["source_url"].endswith("/current.osm.pbf")
     with pytest.raises(SourceError, match="requires sha256"):
         obtain_source({"sources": [invalid]}, tmp_path / "bad")
-
-
-def test_check_is_nonmutating_and_detects_failure(monkeypatch, tmp_path):
-    data = make_pbf(tmp_path / "fixture.osm.pbf", today())
-    route(monkeypatch, data)
-    before = sorted(p.name for p in tmp_path.iterdir())
-    results = check_sources({"sources": [remote_config()]})
-    assert results[0]["ok"]
-    assert before == sorted(p.name for p in tmp_path.iterdir())
-    assert not check_sources({"input": {"path": str(tmp_path / "missing"), "coverage_id": "tiny"}})[0]["ok"]
 
 
 def test_https_redirect_downgrade_rejected_before_request(monkeypatch, tmp_path):

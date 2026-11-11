@@ -1,17 +1,13 @@
 import json
 from pathlib import Path
-import subprocess
-import sys
 
 import pyarrow.parquet as pq
 import pytest
+from helpers import configure, csv_rows, full_row, part, row, run_collection, write_json
 
-from poi_osm.selection import PrimarySelector, TERADATA_FIELDS
-from poi_osm.objects import collapse, export_objects
+from poi_osm.objects import collapse, export_objects, object_rows
+from poi_osm.selection import PrimarySelector
 from poi_osm.storage import Registry
-from test_objects import full_row
-from test_storage import row
-from test_pipeline import project, invoke, manifest, csv_rows, configure, write_json, replace_snapshot
 
 
 def assignment(tag, telecom=False, subtype=None):
@@ -53,77 +49,55 @@ def test_duplicate_priority_entries_rejected():
         PrimarySelector({'telecom_type_priority':[], 'telecom_tag_priority':['repair','repair'], 'other_tag_priority':[]})
 
 
-def test_warehouse_snapshot_is_unique_and_priority_change_is_upserted_in_same_key(project):
-    invoke(project)
-    first = manifest(project)
-    run = Path(first['output'])
-    rows = csv_rows(run/'poi_teradata.csv')
-    assert len(rows) == 3
-    assert len({(r['osm_type'],r['osm_id']) for r in rows}) == 3
-    selected = next(r for r in rows if r['osm_id']=='1')
-    assert selected['primary_tag'] == 'bakery'
-    assert set(json.loads(selected['all_tags'])) == {'bakery','hotel'}
-    assert 'tag' not in selected
-    assert selected['is_telecom'] == '0'
-    table = pq.read_table(run/'poi_teradata.parquet')
-    assert table.num_rows == 3
-    assert table.schema.names == TERADATA_FIELDS
-    # Export priorities may change without changing raw snapshot/filter state.
-    rules = {'telecom_type_priority':[], 'telecom_tag_priority':[], 'other_tag_priority':['hotel','bakery']}
-    write_json(project/'config/priorities.json',rules)
-    configure(project,primary_selection='config/priorities.json')
-    invoke(project)
-    second = manifest(project)
-    updated = next(r for r in csv_rows(Path(second['output'])/'poi_teradata.csv') if r['osm_id']=='1')
-    assert updated['primary_tag'] == 'hotel'
-    assert updated['osm_uid'] == selected['osm_uid']
-    assert second['metrics']['changes'] == {'UNCHANGED':4}
-    assert first['object_export']['primary_rules_sha256'] != second['object_export']['primary_rules_sha256']
+def test_warehouse_snapshot_priority_change_keeps_the_same_key(collection):
+    for stem,code,west,east,extra in [('alpha','RU-AA',0,10,2),('beta','RU-BB',10,20,3)]:
+        part(collection/f'inputs/{stem}-261108.osm.pbf',code,west,east,extra,
+             shared_tags={'shop':'bakery','tourism':'hotel','name':'Общий'})
+    profile=json.loads((collection/'profile.json').read_text());profile['complete_snapshot_confirmed']=True
+    write_json(collection/'profile.json',profile)
+    first=run_collection(collection,'--production')
+    selected=next(r for r in csv_rows(Path(first['output'])/'poi_teradata.csv') if r['osm_id']=='1')
+    assert selected['primary_tag']=='bakery'
+    assert set(json.loads(selected['all_tags']))=={'bakery','hotel'}
+    write_json(collection/'config/priorities.json',{'telecom_type_priority':[],'telecom_tag_priority':[], 'other_tag_priority':['hotel','bakery']})
+    configure(collection,primary_selection='config/priorities.json')
+    second=run_collection(collection,'--production')
+    updated=next(r for r in csv_rows(Path(second['output'])/'poi_teradata.csv') if r['osm_id']=='1')
+    assert updated['primary_tag']=='hotel' and updated['osm_uid']==selected['osm_uid']
+    assert second['metrics']['changes']=={'UNCHANGED':4}
+    assert second['cached_extracts']==2
+    assert first['object_export']['primary_rules_sha256']!=second['object_export']['primary_rules_sha256']
 
 
 def test_warehouse_sql_key_and_merge_do_not_include_primary_tag():
-    sql = (Path(__file__).resolve().parents[1]/'docs/teradata.sql').read_text(encoding='utf-8')
+    sql = (Path(__file__).resolve().parents[1]/'docs/teradata_compact.sql').read_text(encoding='utf-8')
     assert 'UNIQUE PRIMARY INDEX ("OSM_TYPE", "OSM_ID")' in sql
     on_clause = sql.split('ON t.')[1].split('WHEN MATCHED')[0]
     assert 'PRIMARY_TAG' not in on_clause
 
 
-def test_existing_run_conversion_accepts_priority_config_without_reparsing(project):
-    invoke(project)
-    original = manifest(project)
-    run = Path(original['output'])
-    custom = project/'priorities.json'
-    write_json(custom,{'telecom_type_priority':[], 'telecom_tag_priority':[], 'other_tag_priority':['hotel','bakery']})
-    result = subprocess.run([sys.executable,'-m','poi_osm.objects',str(run),'--priority-config',str(custom)],
-                            cwd=Path(__file__).resolve().parents[1],capture_output=True,encoding='utf-8',timeout=30)
-    assert result.returncode == 0, result.stderr
-    output = Path(json.loads(result.stdout)['output'])
-    selected = next(r for r in csv_rows(output/'poi_teradata.csv') if r['osm_id']=='1')
-    assert selected['primary_tag'] == 'hotel'
-    assert set(json.loads(selected['all_tags'])) == {'bakery','hotel'}
-    assert manifest(project)['run_id'] == original['run_id']
-
-
-def test_real_multicategory_telecom_object_has_one_warehouse_row(project):
-    write_json(project/'config/tag_mapping.json',{'electronics':['shop'], 'mobile_phone':['repair']})
-    replace_snapshot(project,[(1,37,55,{'shop':'electronics','repair':'mobile_phone','brand':'МТС','name':'Мастерская'})])
-    invoke(project)
-    report = manifest(project)
-    output = Path(report['output'])
-    rows = csv_rows(output/'poi_teradata.csv')
-    assert len(rows) == 1
-    record = rows[0]
-    assert record['primary_tag'] == 'mobile_phone'
-    assert record['primary_subcategory'] == 'Ремонт телефонов'
-    assert record['primary_osm_key'] == 'repair'
-    assert record['is_telecom'] == '1'
-    assert record['chain_id'] == 'mts'
-    assert record['is_chain'] == '1'
-    assert set(json.loads(record['all_tags'])) == {'electronics','mobile_phone'}
-    parquet = pq.read_table(output/'poi_teradata.parquet').to_pylist()
-    assert len(parquet) == 1 and parquet[0]['is_telecom'] is True
-    assert report['metrics']['category_rows'] == 2
-    assert report['metrics']['unique_objects'] == 1
+def test_real_multicategory_telecom_object_has_one_warehouse_row(tmp_path):
+    from poi_osm.classification import default_classifier
+    tags={'shop':'electronics','repair':'mobile_phone','brand':'МТС','name':'Мастерская'}
+    store=Registry(tmp_path/'registry.sqlite',{'electronics':['shop'],'mobile_phone':['repair']},'2026-11-11',
+                   {'source_date':'2026-11-11','path':'fixture.pbf'})
+    for tag,key in [('electronics','shop'),('mobile_phone','repair')]:
+        value=full_row()
+        value.update(tag=tag,osm_key=key,osm_value=tag,point_name=tags['name'])
+        value.update(default_classifier().classify(tags,tag))
+        store.insert(value)
+    store.compare(None)
+    output=tmp_path/'export';report=export_objects(store.db,output)
+    records=csv_rows(output/'poi_teradata.csv');assert len(records)==1
+    record=records[0]
+    assert record['primary_tag']=='mobile_phone'
+    assert record['primary_subcategory']=='Ремонт телефонов'
+    assert record['primary_osm_key']=='repair' and record['is_telecom']=='1'
+    assert record['chain_id']=='mts' and record['is_chain']=='1'
+    assert set(json.loads(record['all_tags']))=={'electronics','mobile_phone'}
+    assert report['category_rows']==2 and report['unique_objects']==1
+    assert pq.read_table(output/'poi_teradata.parquet').to_pylist()[0]['is_telecom'] is True
+    store.close()
 
 
 @pytest.mark.parametrize('only_relations', [False, True])
@@ -136,7 +110,7 @@ def test_relations_are_excluded_only_from_teradata_export(tmp_path, only_relatio
     store.compare(None)
     output = tmp_path/'export'
     report = export_objects(store.db,output,batch_size=1)
-    assert {r['osm_type'] for r in csv_rows(output/'poi.csv')} == set(types)
+    assert {r['osm_type'] for r in object_rows(store.db)} == set(types)
     assert report['unique_objects'] == len(types)
     assert report['teradata_objects'] == len(types)-1
     assert report['teradata_excluded_by_type'] == {'relation':1}

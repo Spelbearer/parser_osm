@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+
 from .classification import CONFIG, Classifier
 from .selection import PrimarySelector
 

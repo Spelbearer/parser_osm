@@ -1,11 +1,15 @@
-# Cloud development startup
+# Cloud development
 
-Use the existing checkout at /workspace/parser_osm. Each task is already isolated; do not create a Git worktree unless the user explicitly asks. Use /workspace/parser_osm/.venv/bin/python (Python 3.11). If dependencies need refresh, run bash scripts/cloud_install.sh from /workspace/parser_osm; this also runs the tests.
+Use `/workspace/parser_osm` and the existing `.venv/bin/python`. The cloud dependency bootstrap remains `scripts/cloud_install.sh`; it installs the pinned development requirements and runs tests. Do not change or publish the cloud environment as part of normal repository work.
 
-No persistent service is required: this is a batch CLI. From /workspace/parser_osm, run .venv/bin/python scripts/make_demo.py, then .venv/bin/python main.py --config demo/settings.json --mode full, then --mode incremental and --check with the same config. The synthetic demo exercises nodes, area ways and multipolygon relations; repeating its unchanged PBF should report UNCHANGED and no NEW/UPDATED/DELETED. Run .venv/bin/python -m pytest -q for the test suite. Demo fixtures and outputs are ignored and retained under demo/.
+Run:
 
-For production read README.md and docs/architecture.md first. User selected internationally recognized Russian territory. commercial, food, retail and coffee remain disabled; shop=outpost is now enabled for parcel pickup points under the address-program request. Business categories and chain recognition are configured in config/categories.json and config/chains.json; see docs/business-filters.md. config/regions.json lists83 ISO RU codes. Actual production boundary polygons are not bundled: provide audited WGS84 nonoverlapping polygons with source and coverage_id metadata and all registry codes, then set boundaries_reviewed=true after review. Never substitute synthetic demo polygons. Geofabrik and OSM Wiki connections were blocked by outbound policy; the domains download.geofabrik.de and wiki.openstreetmap.org are needed for live source checks. Current general availability/date/size of the Russia PBF has not been verified. No credentials are required for public PBF sources.
+```bash
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest -q
+.venv/bin/python run.py --version
+```
 
-Use .venv/bin/python main.py --check before production runs. An unfinished source or unreviewed boundary configuration must fail rather than publish. FULL and INCREMENTAL both process complete PBF snapshots and compare with the previous successful version; replication diffs are not implemented. Regional runs have separate state scopes. Read the published data paths from state/last_success.json (or state/scopes/<ISO-code>/last_success.json); preserve prior versions and failed work directories. Do not bypass hashes, TLS, completeness or quality checks. Windows scheduling instructions are in docs/windows-scheduler.md; Windows runtime and full-Russia performance still need validation.
+Tests create real small synthetic PBFs in pytest temporary directories. No downloaded Russia dataset, credentials or external service is required for tests. There is no permanent web service. Python 3.11 and 3.13 are supported; GitHub Actions checks Linux and Windows.
 
-These instructions are retained in the repository. Saving the environment configuration draft failed with INVALID_ARGUMENT; persistence of install_script/start_skill could not be confirmed. No publication was performed.
+The only production entry is `run.py`; see README.md. New installations require reviewed WGS84 boundaries and the complete local federal-district extract set. Existing installations keep their state and can use `--adopt` once to migrate the old output layout. Do not bypass source hashes, dates, geographic coverage, quality checks or the publication lock. Production data and user-uploaded attachments are not test fixtures.

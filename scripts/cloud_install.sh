@@ -9,4 +9,5 @@ if [ ! -x .venv/bin/python ]; then
 fi
 .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 11), "Use a Python 3.11 virtual environment"'
 uv pip install --python .venv/bin/python -r requirements-dev.txt
+.venv/bin/python -m ruff check .
 .venv/bin/python -m pytest -q

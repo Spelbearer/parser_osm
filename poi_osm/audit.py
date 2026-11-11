@@ -2,19 +2,21 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import csv
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
 import math
-from pathlib import Path, PureWindowsPath
 import sqlite3
 import tempfile
 import uuid
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path, PureWindowsPath
 
 from shapely import from_wkt
+
+from .runtime import configure_utf8
 
 LOG = logging.getLogger(__name__)
 
@@ -171,6 +173,7 @@ def audit(run, output):
 
 
 def main(argv=None):
+    configure_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)

@@ -11,13 +11,13 @@ import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import shutil
 import tempfile
 import time
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 
@@ -238,6 +238,7 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
     os.close(descriptor)
     os.replace(temporary, pbf_temporary)
     temporary = pbf_temporary
+    metadata_temp = metadata_path.with_suffix(".json.part")
     try:
         digest = hashlib.sha256()
         publisher_digest = hashlib.new(algorithm)
@@ -276,7 +277,6 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
         }
         # Only the validated file replaces a previous cache. Interrupted metadata
         # replacement leaves a detectable hash mismatch, never a trusted cache.
-        metadata_temp = metadata_path.with_suffix(".json.part")
         with metadata_temp.open("w", encoding="utf-8") as stream:
             json.dump(metadata, stream, ensure_ascii=False, indent=2)
             stream.flush()
@@ -285,9 +285,8 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
         os.replace(metadata_temp, metadata_path)
         return {**metadata, "path": target}
     finally:
-        # Failed partial files are deliberately retained for diagnosis; a new
-        # attempt gets its own name and never treats a partial as cached input.
-        pass
+        temporary.unlink(missing_ok=True)
+        metadata_temp.unlink(missing_ok=True)
 
 
 def obtain_source(settings: dict, source_dir: Path, force: bool = False) -> dict:
@@ -339,31 +338,3 @@ def obtain_source(settings: dict, source_dir: Path, force: bool = False) -> dict
             except (OSError, ValueError, KeyError, requests.RequestException, SourceError) as exc:
                 failures.append(f"{_safe_url(config.get('url', ''))}: {_error(exc)}")
     raise SourceError("No usable source: " + "; ".join(failures))
-
-
-def check_sources(settings: dict) -> list[dict]:
-    """Check configured inputs without creating directories/files or downloading PBF."""
-    if settings.get("input"):
-        try:
-            result = _local(settings["input"])
-            return [{"ok": True, **{k: str(v) if isinstance(v, Path) else v for k, v in result.items()}}]
-        except (OSError, ValueError, KeyError, SourceError) as exc:
-            return [{"ok": False, "error": str(exc)}]
-    results = []
-    with requests.Session() as session:
-        for config in settings.get("sources", []):
-            try:
-                _scope(config)
-                _pin(config)
-                if not config.get("sha256") and not config.get("checksum_url"):
-                    raise SourceError("A remote snapshot requires a publisher checksum")
-                _expected_digest(session, config)
-                with _request(session, "HEAD", config["url"], timeout=(15, config.get("timeout_seconds", 20))) as response:
-                    response.raise_for_status()
-                    _https(response.url)
-                    results.append({"ok": True, "url": _safe_url(config["url"]), "status": response.status_code,
-                                    "size_bytes": response.headers.get("Content-Length"),
-                                    "last_modified": response.headers.get("Last-Modified")})
-            except (OSError, ValueError, KeyError, requests.RequestException, SourceError) as exc:
-                results.append({"ok": False, "url": _safe_url(config.get("url", "")), "error": _error(exc)})
-    return results or [{"ok": False, "error": "No sources configured"}]

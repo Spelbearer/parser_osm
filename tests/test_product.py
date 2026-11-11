@@ -1,15 +1,15 @@
 import json
-from pathlib import Path
 import sqlite3
 import zipfile
+from pathlib import Path
 
 import pytest
+from helpers import configure, part, run_collection, write_json
 
+from poi_osm import __version__
 from poi_osm.classification import CONFIG
 from poi_osm.kml import build as build_kml
-from poi_osm.product import execute,remove_owned,recover_swap,publish
-from test_collection import collection,run_collection,part
-from test_pipeline import project,configure,write_json
+from poi_osm.product import execute, publish, recover_swap, remove_owned
 
 
 @pytest.fixture
@@ -191,4 +191,50 @@ def test_corrupt_old_zip_is_rebuilt_before_legacy_cleanup(legacy):
     with zipfile.ZipFile(root/'result/poi_layers.zip') as saved:
         assert saved.testzip() is None
     assert not (root/'kml').exists()
+    assert not (root/'.work').exists()
+
+
+def test_fresh_installation_initializes_and_runs_without_legacy_tools(collection):
+    import subprocess
+    import sys
+
+    from poi_osm.product import REPO
+    root=collection/'fresh'
+    initialized=subprocess.run([sys.executable,str(REPO/'run.py'),'--root',str(root),'--init',
+        '--input',str(collection/'inputs'),'--boundaries',str(collection/'boundaries/regions.geojson'),
+        '--settings',str(collection/'config/settings.json'),'--profile',str(collection/'profile.json')],
+        cwd=REPO,capture_output=True,encoding='utf-8',timeout=90)
+    assert initialized.returncode==0,initialized.stderr
+    assert json.loads(initialized.stdout)['status']=='PRODUCT_INITIALIZED'
+    assert not (root/'result').exists() and not (root/'.work').exists()
+    finished=subprocess.run([sys.executable,str(REPO/'run.py'),'--root',str(root)],
+        cwd=REPO,capture_output=True,encoding='utf-8',timeout=90)
+    assert finished.returncode==0,finished.stderr
+    result=json.loads((root/'result/analysis/summary.json').read_text())
+    assert result['total_objects']==3 and result['version']==__version__
+    assert len(result['columns'])==17
+    assert not list(root.rglob('full')) and not list(root.rglob('delta'))
+    assert not (root/'.work').exists()
+
+
+def test_failed_legacy_manifest_cannot_be_adopted(legacy):
+    collection,root,first=legacy
+    path=Path(first['output'])/'summary.json';info=json.loads(path.read_text());info['status']='FAILED';write_json(path,info)
+    with pytest.raises(ValueError,match='disagree'):
+        execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
+    assert Path(first['registry']).is_file()
+    assert not (root/'result').exists()
+    assert not (root/'.work').exists()
+
+
+def test_quality_failure_keeps_current_result_after_refactor(legacy):
+    collection,root,first=legacy
+    execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
+    saved=(root/'result/.state/registry.sqlite').read_bytes()
+    settings=json.loads((root/'config/settings.json').read_text())
+    settings['quality']['max_count_drop_fraction']=0.25
+    write_json(root/'config/settings.json',settings)
+    part(collection/'inputs/alpha-261108.osm.pbf','RU-AA',0,10,2,include_extra=False)
+    with pytest.raises(RuntimeError,match='Collection failed'):execute(root,'run')
+    assert (root/'result/.state/registry.sqlite').read_bytes()==saved
     assert not (root/'.work').exists()

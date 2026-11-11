@@ -3,8 +3,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from contextlib import contextmanager
 from pathlib import Path
+
+
+def configure_utf8():
+    """Keep JSON, worker pipes and logs independent of Windows console encoding."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
 def cleanup_index(path: Path):

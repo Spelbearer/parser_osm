@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import math
 import sqlite3
-from datetime import date
 from pathlib import Path
 
 from shapely import from_wkt
+
 from .classification import default_classifier
 
 FIELDS = ["tag", "osm_id", "point_name", "lon", "lat", "wkt", "region_name", "region_code",
@@ -110,48 +109,6 @@ class Registry:
                 "by_chain": dict(self.db.execute("SELECT chain_name,COUNT(*) FROM poi WHERE record_status!='DELETED' AND is_chain=1 GROUP BY chain_name")),
                 "chain_not_identified_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND chain_status='not_identified'").fetchone()[0],
                 "chain_conflict_total": self.db.execute("SELECT COUNT(*) FROM poi WHERE record_status!='DELETED' AND chain_status='conflict'").fetchone()[0]}
-
-    def export(self, run: Path, region_codes: list[str], parquet: bool, *, selection_rules=None):
-        (run / "full").mkdir()
-        (run / "delta").mkdir()
-        for code in region_codes + [""]:
-            self._csv(run / "full" / f"{code or 'unassigned'}.csv",
-                      "SELECT " + ",".join(FIELDS) + " FROM poi WHERE record_status!='DELETED' AND COALESCE(region_code,'')=? ORDER BY osm_type,osm_id,tag", (code,))
-        for status, filename in [("NEW", "new_poi"), ("UPDATED", "updated_poi"), ("DELETED", "deleted_poi")]:
-            self._csv(run / "delta" / (filename + ".csv"), "SELECT " + ",".join("p." + k for k in FIELDS) +
-                      " FROM poi p JOIN changes c USING(osm_type,osm_id,tag) WHERE c.status=? ORDER BY p.osm_type,p.osm_id,p.tag", (status,))
-        if parquet:
-            import pyarrow as pa
-            import pyarrow.parquet as pq
-            dates = {"update_date", "source_date", "first_seen_date", "last_seen_date"}
-            schema = pa.schema([(k, pa.float64() if k in {"lon", "lat"} else pa.date32() if k in dates else pa.bool_() if k in BOOLEAN_FIELDS else pa.string()) for k in FIELDS])
-            cursor = self.db.execute("SELECT " + ",".join(FIELDS) + " FROM poi WHERE record_status!='DELETED' AND COALESCE(region_code,'')!=''")
-            count = 0
-            with pq.ParquetWriter(run / "all_russia.parquet", schema, compression="zstd") as writer:
-                while rows := cursor.fetchmany(self.batch_size):
-                    records = [{k: date.fromisoformat(v) if k in dates and v else bool(v) if k in BOOLEAN_FIELDS and v is not None else v for k, v in zip(FIELDS, row)} for row in rows]
-                    writer.write_table(pa.Table.from_pylist(records, schema=schema))
-                    count += len(rows)
-            saved = pq.ParquetFile(run / "all_russia.parquet")
-            decoded_count = sum(batch.num_rows for batch in saved.iter_batches(batch_size=self.batch_size))
-            if saved.metadata.num_rows != count or decoded_count != count or saved.schema_arrow != schema:
-                raise ValueError("Parquet verification failed")
-        from .objects import export_objects
-        return export_objects(self.db, run, parquet=parquet, batch_size=self.batch_size, region_codes=region_codes, selection_rules=selection_rules)
-
-    def _csv(self, path: Path, query: str, args: tuple):
-        count = 0
-        with path.open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.writer(stream, delimiter=";")
-            writer.writerow(FIELDS)
-            cursor = self.db.execute(query, args)
-            while rows := cursor.fetchmany(self.batch_size):
-                writer.writerows(rows)
-                count += len(rows)
-        with path.open(encoding="utf-8-sig", newline="") as stream:
-            reader = csv.reader(stream, delimiter=";")
-            if next(reader) != FIELDS or sum(1 for row in reader if len(row) == len(FIELDS)) != count:
-                raise ValueError(f"CSV verification failed: {path}")
 
     def close(self):
         self.db.close()

@@ -1,64 +1,16 @@
 import csv
-import hashlib
 import json
-from datetime import datetime,timezone
+from datetime import datetime, timezone
 from pathlib import Path
-import subprocess
-import sys
 
-import osmium
 import pytest
-from shapely.geometry import Polygon,shape
+from helpers import configure, csv_rows, part, run_collection, supplement, write_json
+from shapely.geometry import Polygon
 
-from poi_osm.collection import inspect_sources,profile_from,worker_for
+from poi_osm.collection import inspect_sources, profile_from, worker_for
 from poi_osm.config import load_settings
-from poi_osm.collection_boundaries import split_dateline,combine_boundaries
+from poi_osm.geography import combine_boundaries, split_dateline
 from poi_osm.region_files import split_regions
-from test_pipeline import project,write_json,configure,csv_rows
-
-
-def part(path,code,west,east,extra_id,*,shared_tag='bakery',include_extra=True,timestamp=None):
-    path.unlink(missing_ok=True)
-    header=osmium.io.Header()
-    header.set('osmosis_replication_timestamp',timestamp or datetime.now(timezone.utc).date().isoformat()+'T00:00:00Z')
-    with osmium.SimpleWriter(str(path),header=header) as writer:
-        writer.add_node(osmium.osm.mutable.Node(id=1,location=(1,1),tags={('tourism' if shared_tag=='hotel' else 'shop'):shared_tag,'name':'Общий'}))
-        if include_extra:
-            writer.add_node(osmium.osm.mutable.Node(id=extra_id,location=(west+2,2),tags={'shop':'bakery','name':code}))
-        for n,xy in enumerate([(west,0),(east,0),(east,10),(west,10)],100):
-            writer.add_node(osmium.osm.mutable.Node(id=n,location=xy))
-        writer.add_way(osmium.osm.mutable.Way(id=100,nodes=[100,101,102,103,100],tags={
-            'boundary':'administrative','admin_level':'4','ISO3166-2':code}))
-
-
-@pytest.fixture
-def collection(project):
-    inputs=project/'inputs';inputs.mkdir()
-    part(inputs/'alpha-261108.osm.pbf','RU-AA',0,10,2)
-    part(inputs/'beta-261108.osm.pbf','RU-BB',10,20,3)
-    # Deliberately not a PBF: the excluded extract must never be read.
-    (inputs/'crimean-261108.osm.pbf').write_bytes(b'excluded')
-    regions=[{'region_code':'RU-AA','region_name':'Регион А','region_id':'a'},
-             {'region_code':'RU-BB','region_name':'Регион Б','region_id':'b'}]
-    write_json(project/'config/regions.json',{'source':'synthetic test','coverage_id':'test-two-regions','regions':regions})
-    features=[]
-    for r,w,e in [(regions[0],0,10),(regions[1],10,20)]:
-        features.append({'type':'Feature','properties':{'region_code':r['region_code']},
-                         'geometry':{'type':'Polygon','coordinates':[[[w,0],[e,0],[e,10],[w,10],[w,0]]]}})
-    write_json(project/'boundaries/regions.geojson',{'type':'FeatureCollection','coverage_id':'test-two-regions',
-                                                   'source':'synthetic test','features':features})
-    profile={'coverage_id':'test-two-regions','expected_extracts':['alpha','beta'],
-             'excluded_extracts':['crimean'],'max_rows_per_region_file':1,'complete_snapshot_confirmed':False}
-    write_json(project/'profile.json',profile)
-    return project
-
-
-def run_collection(root,*args,ok=True):
-    result=subprocess.run([sys.executable,'-m','poi_osm.collection',str(root/'inputs'),'--config',str(root/'config/settings.json'),
-                           '--profile',str(root/'profile.json'),'--output',str(root/'results'),*args],
-                          cwd=Path(__file__).resolve().parents[1],capture_output=True,encoding='utf-8',timeout=90)
-    assert (result.returncode==0)==ok,result.stdout+result.stderr
-    return json.loads(result.stdout) if ok else result
 
 
 def test_collection_merge_region_chunks_and_checkpoint_reuse(collection):
@@ -71,7 +23,7 @@ def test_collection_merge_region_chunks_and_checkpoint_reuse(collection):
     assert len(first['regional_export']['files'])==3  # A splits 2 rows into 2 parts; B has 1.
     output=Path(first['output'])
     assert len(csv_rows(output/'poi_teradata.csv'))==3
-    assert {r['region_code'] for r in csv_rows(output/'poi.csv')}=={'RU-AA','RU-BB'}
+    assert {r['region_code'] for r in csv_rows(output/'poi_teradata.csv')}=={'RU-AA','RU-BB'}
     assert all(info['rows']<=1 for info in first['regional_export']['files'])
     assert len(csv_rows(output/'regions_index.csv'))==3
     assert not (collection/'results/state/last_success.json').exists()
@@ -208,15 +160,6 @@ def test_different_polygons_for_same_code_are_reported_not_arbitrarily_selected(
     assert index.lookup(1,1) is None
     assert report['conflicting_region_codes']==['RU-AA']
     assert report['missing_region_codes']==['RU-AA']
-
-
-def supplement(root, sources, *, code='RU-BB'):
-    path=root/'supplement.geojson'
-    write_json(path, {'type':'FeatureCollection','source':'synthetic recovery','review_required':True,
-                     'source_sha256':{s['extract']:s['sha256'] for s in sources},
-                     'features':[{'type':'Feature','properties':{'region_code':code},
-                                  'geometry':{'type':'Polygon','coordinates':[[[10,0],[20,0],[20,10],[10,10],[10,0]]]}}]})
-    return path
 
 
 def test_recovered_supplement_reassigns_cached_pois_without_extraction(collection):

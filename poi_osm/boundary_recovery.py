@@ -2,21 +2,21 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from datetime import datetime, timezone
 import json
 import logging
-from pathlib import Path
 import uuid
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 
 import osmium
 from shapely import wkb
+from shapely.errors import GEOSException
 from shapely.geometry import LineString, mapping
 from shapely.prepared import prep
-from shapely.errors import GEOSException
 
-from .collection_boundaries import split_dateline
-from .runtime import atomic_json
+from .geography import split_dateline
+from .runtime import atomic_json, configure_utf8
 from .sources import _hash_file
 
 LOG = logging.getLogger(__name__)
@@ -182,6 +182,7 @@ def recover(run, output):
 
 
 def main(argv=None):
+    configure_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('run', type=Path)
     parser.add_argument('--output-dir', required=True, type=Path)

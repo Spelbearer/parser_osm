@@ -10,14 +10,14 @@ from pathlib import Path
 from .classification import from_settings
 from .config import load_settings
 from .extract import extract_pois
-from .geography import prepare_boundaries
-from .preview import UnassignedIndex
-from .runtime import atomic_json
-from .sources import obtain_source, _hash_file
+from .geography import UnassignedIndex, prepare_boundaries
+from .runtime import atomic_json, configure_utf8
+from .sources import _hash_file, obtain_source
 from .storage import Registry
 
 
 def main(argv=None):
+    configure_utf8()
     for stream in (sys.stdout,sys.stderr):
         if stream and hasattr(stream,'reconfigure'):
             stream.reconfigure(encoding='utf-8',errors='backslashreplace')

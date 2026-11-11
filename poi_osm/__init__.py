@@ -1,2 +1,2 @@
-"""Streaming OSM POI snapshot processing."""
-__version__ = "0.1.0"
+"""OSM POI production exports and KML density layers."""
+__version__ = "0.9.0rc1"

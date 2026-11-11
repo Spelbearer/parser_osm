@@ -2,30 +2,32 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import closing, ExitStack
-from datetime import datetime, timezone
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import shutil
 import signal
-import stat
 import sqlite3
+import stat
 import subprocess
 import sys
 import uuid
 import zipfile
+from contextlib import ExitStack, closing
+from datetime import datetime, timezone
+from pathlib import Path
 
+from . import __version__
 from .audit import audit
 from .classification import CONFIG
+from .collection import inspect_sources, profile_from
 from .config import load_settings
 from .geography import RegionIndex
 from .kml import build as build_kml
 from .objects import export_objects
 from .region_files import split_regions
-from .runtime import atomic_json, process_lock
+from .runtime import atomic_json, configure_utf8, process_lock
 from .sources import _hash_file
 from .teradata_export import export as export_warehouse
 
@@ -185,31 +187,42 @@ def publish(bundle, root, work, run_id):
     (root/'.swap.json').unlink()
 
 
+def configure_product(root, settings_path, profile_path, boundary, input_folder):
+    settings=load_settings(Path(settings_path))
+    profile=profile_from(Path(profile_path))
+    if profile['coverage_id']!=settings['coverage_id']:
+        raise ValueError('Collection profile and geographic coverage differ')
+    RegionIndex(Path(boundary),Path(settings['regions']))
+    for folder in ['config','boundaries']:
+        if (root/folder).exists(): raise ValueError(f'{root/folder} already exists without product.json; preserve it and choose another output root')
+    (root/'config').mkdir();(root/'boundaries').mkdir()
+    shutil.copyfile(boundary,root/'boundaries/regions.geojson')
+    shutil.copyfile(settings['regions'],root/'boundaries/regions.json')
+    allowed={'project_root','coverage_id','coverage_confirmed','boundaries_reviewed','tag_mapping','regions',
+             'boundaries','name_priority','line_policy','batch_size','quality','categories','chains','telecom','primary_selection'}
+    document={k:v for k,v in read(settings_path).items() if k in allowed}
+    document.update(project_root=settings['root'],regions=str(root/'boundaries/regions.json'),
+                    boundaries=str(root/'boundaries/regions.geojson'),coverage_confirmed=True,boundaries_reviewed=True)
+    atomic_json(root/'config/settings.json',document)
+    profile['complete_snapshot_confirmed']=True
+    atomic_json(root/'config/collection.json',profile)
+    shutil.copyfile(CONFIG/'teradata_export.json',root/'config/teradata_export.json')
+    shutil.copyfile(CONFIG/'kml.json',root/'config/kml.json')
+    config={'version':1,'input_folder':str(Path(input_folder).resolve()),'settings':'config/settings.json',
+            'collection_profile':'config/collection.json','export_profile':'config/teradata_export.json',
+            'kml_config':'config/kml.json','keep_results':1,'logs_to_keep':10}
+    atomic_json(root/'product.json',config)
+    return config
+
+
 def initialise(root, source, settings_path=None, profile_path=None):
     old=read(source/'summary.json')
     boundary=source/'approved_boundaries.geojson'
     if not boundary.is_file(): boundary=Path(old['boundary_report']['source'])
     original=Path(settings_path) if settings_path else Path(old['boundary_report']['source']).parent/'settings.json'
     profile=Path(profile_path) if profile_path else original.parent/'collection.json'
-    settings=load_settings(original)
-    RegionIndex(boundary,Path(settings['regions']))
-    for folder in ['config','boundaries']:
-        if (root/folder).exists(): raise ValueError(f'{root/folder} already exists without product.json; preserve it and choose another output root')
-    (root/'config').mkdir();(root/'boundaries').mkdir()
-    shutil.copyfile(boundary,root/'boundaries/regions.geojson')
-    shutil.copyfile(settings['regions'],root/'boundaries/regions.json')
-    document=read(original)
-    document.update(project_root=settings['root'],regions=str(root/'boundaries/regions.json'),boundaries=str(root/'boundaries/regions.geojson'))
-    atomic_json(root/'config/settings.json',document)
-    shutil.copyfile(profile,root/'config/collection.json')
-    shutil.copyfile(CONFIG/'teradata_export.json',root/'config/teradata_export.json')
-    shutil.copyfile(CONFIG/'kml.json',root/'config/kml.json')
     parents=[str(Path(s['path']).resolve().parent) for s in old['sources']]
-    config={'version':1,'input_folder':os.path.commonpath(parents),'settings':'config/settings.json',
-            'collection_profile':'config/collection.json','export_profile':'config/teradata_export.json',
-            'kml_config':'config/kml.json','keep_results':1,'logs_to_keep':10}
-    atomic_json(root/'product.json',config)
-    return config
+    return configure_product(root,original,profile,boundary,os.path.commonpath(parents))
 
 
 def copy_registry(source, destination):
@@ -242,7 +255,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     source=work/'source';source.mkdir()
     LOG.info('Preparing exports from the saved registry')
     with closing(sqlite3.connect(Path(registry).resolve().as_uri()+'?mode=ro',uri=True)) as db:
-        objects=export_objects(db,source,selection_rules=settings['primary_rules'])
+        objects=export_objects(db,source,selection_rules=settings['primary_rules'],parquet=False)
     regional=split_regions(source/'poi_teradata.csv',source/'regions',regions)
     source_info={**manifest,'status':'SUCCESS','production':True,'boundaries_reviewed':True,'complete_coverage_verified':True,
                  'object_export':objects,'regional_export':regional}
@@ -288,7 +301,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
                  boundary_report={'candidate_region_count':len(regions['regions']),'missing_region_codes':[],
                                   'conflicting_region_codes':[],'invalid_boundary_codes':{},'review_required':False})
     atomic_json(bundle/'.state/last_success.json',state)
-    report={'status':'PRODUCT_SUCCESS','product_run_id':run_id,'source_date':manifest['source_date'],
+    report={'status':'PRODUCT_SUCCESS','version':__version__,'product_run_id':run_id,'source_date':manifest['source_date'],
             'output':str(root/'result'),'archive':str(root/'result/poi_layers.zip'),
             'total_objects':export['total_rows'],'columns':export['columns'],'kml_counts':kml_report['counts'],
             'unassigned_objects':export['regional_export']['by_region'].get('',0),'file_checks_ok':True,
@@ -303,7 +316,7 @@ def run_collection(root, work, config):
     previous=root/'result/.state/last_success.json'
     if previous.exists(): atomic_json(transient/'state/last_success.json',read(previous))
     args=[sys.executable,'-m','poi_osm.collection',config['input_folder'],'--output',str(transient),
-          '--config',str(root/config['settings']),'--profile',str(root/config['collection_profile']),'--production']
+          '--config',str(root/config['settings']),'--profile',str(root/config['collection_profile']),'--production','--registry-only']
     LOG.info('Extracting the current PBF snapshot; temporary caches will be removed after completion')
     with (work/'collection-result.json').open('w',encoding='utf-8') as saved:
         process=subprocess.Popen(args,cwd=REPO,stdout=saved,stderr=subprocess.PIPE,text=True,encoding='utf-8',
@@ -358,6 +371,9 @@ def validate_product(root, config):
     inputs=Path(config['input_folder']).resolve()
     if inputs.is_relative_to(root) or root.is_relative_to(inputs):
         raise ValueError('PBF inputs and product outputs must be separate directories')
+    current=root/'result'
+    if current.exists() and not (current/'.state/registry.sqlite').is_file():
+        raise ValueError('Previous registry is missing; restore result/.state before updating')
     settings=load_settings(root/config['settings'])
     if not (settings.get('coverage_confirmed') is True and settings.get('boundaries_reviewed') is True):
         raise ValueError('Production needs the previously reviewed boundary configuration')
@@ -365,7 +381,7 @@ def validate_product(root, config):
     return limit
 
 
-def execute(root, action, settings_path=None, profile_path=None):
+def execute(root, action, settings_path=None, profile_path=None, *, input_folder=None, boundary=None):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     (root/'logs').mkdir(exist_ok=True)
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
@@ -387,6 +403,17 @@ def execute(root, action, settings_path=None, profile_path=None):
         atomic_json(work/'owner.json',{'root':str(root),'child_pid':None})
         report=None
         try:
+            if action=='init':
+                if (root/'product.json').exists(): raise ValueError('Already initialized; run without --init')
+                if input_folder is None or boundary is None: raise ValueError('--init requires --input and --boundaries')
+                settings_path=settings_path or CONFIG/'settings.json'
+                profile_path=profile_path or CONFIG/'collection.json'
+                # Read-only source verification runs before configuration is saved.
+                inspect_sources(Path(input_folder),profile_from(Path(profile_path)))
+                config=configure_product(root,settings_path,profile_path,boundary,input_folder)
+                logs_limit=validate_product(root,config)
+                LOG.info('Configuration initialized; run the same command without --init to process PBF')
+                return {'status':'PRODUCT_INITIALIZED','version':__version__,'root':str(root),'input_folder':config['input_folder']}
             if action=='adopt':
                 if (root/'product.json').exists() and (root/'result').exists():
                     raise ValueError('Already migrated; use --files or a normal run')
@@ -400,12 +427,16 @@ def execute(root, action, settings_path=None, profile_path=None):
                     config=read(root/'product.json')
                 else: config=initialise(root,source,settings_path,profile_path)
                 manifest=read(source/'summary.json');registry=Path(legacy['registry'])
+                if manifest.get('status')!='SUCCESS' or not manifest.get('boundaries_reviewed') or manifest.get('registry')!=legacy['registry']:
+                    raise ValueError('Legacy registry and successful manifest disagree; migration refused')
                 review=source/'review.csv';reuse=root/'kml/last_success.json'
             else:
                 if not (root/'product.json').exists(): raise ValueError('First use --adopt with the existing reviewed production result')
                 config=read(root/'product.json')
                 logs_limit=validate_product(root,config)
                 if action=='files':
+                    if not (root/'result/.state/last_success.json').exists():
+                        raise ValueError('No saved registry yet; run without --files first')
                     manifest=read(root/'result/.state/last_success.json');registry=Path(manifest['registry'])
                     review=root/'result/analysis/review.csv';reuse=root/'result/analysis/kml_summary.json'
                 else:
@@ -446,15 +477,25 @@ def execute(root, action, settings_path=None, profile_path=None):
 
 
 def main(argv=None):
+    configure_utf8()
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--version',action='version',version=f'%(prog)s {__version__}')
     parser.add_argument('--root',required=True,type=Path,help='Output root, e.g. D:\\osm_results')
     group=parser.add_mutually_exclusive_group()
+    group.add_argument('--init',action='store_true',help='Initialize a new installation using previously reviewed boundaries')
     group.add_argument('--adopt',action='store_true',help='Migrate a reviewed successful legacy result and remove recognised legacy artifacts')
     group.add_argument('--files',action='store_true',help='Regenerate CSV/Parquet/KML from the saved registry, without PBF')
-    parser.add_argument('--settings',type=Path,help='Legacy settings override for adoption')
-    parser.add_argument('--profile',type=Path,help='Legacy collection profile override for adoption')
+    parser.add_argument('--input',type=Path,help='Local folder of all federal-district PBFs for --init')
+    parser.add_argument('--boundaries',type=Path,help='Previously reviewed complete GeoJSON for --init')
+    parser.add_argument('--settings',type=Path,help='Settings template for initialization or legacy migration')
+    parser.add_argument('--profile',type=Path,help='Collection profile for initialization or legacy migration')
     args=parser.parse_args(argv)
-    report=execute(args.root,'adopt' if args.adopt else 'files' if args.files else 'run',args.settings,args.profile)
+    if not args.init and (args.input is not None or args.boundaries is not None):
+        parser.error('--input and --boundaries are only valid with --init; edit product.json for an existing installation')
+    if args.init and (args.input is None or args.boundaries is None): parser.error('--init requires --input and --boundaries')
+    report=execute(args.root,'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'run',args.settings,args.profile,input_folder=args.input,boundary=args.boundaries)
+    if report['status']=='PRODUCT_INITIALIZED':
+        print(json.dumps(report,ensure_ascii=False,indent=2));return 0
     brief={key:report[key] for key in ['status','output','archive','total_objects','unassigned_objects','cleanup_complete']}
     brief['kml_points']=report['kml_counts']['points_exported']
     brief['circles']=report['kml_counts']['circles']

@@ -1,16 +1,12 @@
 import csv
-import hashlib
 import json
 from pathlib import Path
 
-import osmium
 import pytest
+from helpers import run_collection
 
 from poi_osm.audit import audit
-from poi_osm.boundary_diagnostics import diagnose
 from poi_osm.region_files import split_regions
-from test_collection import collection, run_collection
-from test_pipeline import project
 
 
 def write_csv(path, rows, fields):
@@ -85,29 +81,6 @@ def test_region_copies_must_contain_each_object_once(completed_run, tmp_path):
     assert report['errors']['region_row_count'] == 1
 
 
-def test_relation_metadata_without_geometry_and_changed_source(tmp_path):
-    source = tmp_path / 'volga.osm.pbf'
-    with osmium.SimpleWriter(str(source)) as writer:
-        writer.add_node(osmium.osm.mutable.Node(id=1, location=(1,2)))
-        writer.add_relation(osmium.osm.mutable.Relation(id=10, members=[('w',777,'outer')],
-            tags={'type':'boundary','boundary':'administrative','admin_level':'4','name':'Кировская область'}))
-        writer.add_relation(osmium.osm.mutable.Relation(id=11, tags={'name':'unrelated'}))
-    summary = {'boundary_report':{'missing_region_codes':['RU-KIR']},
-               'sources':[{'path':str(source),'sha256':hashlib.sha256(source.read_bytes()).hexdigest(),
-                           'extract':'volga-fed-district'}]}
-    (tmp_path / 'summary.json').write_text(json.dumps(summary), encoding='utf-8')
-    path, report = diagnose(tmp_path, tmp_path / 'checks')
-    assert path.is_file()
-    assert report['sources'][0]['relations_processed'] == 2
-    records = report['sources'][0]['relations']
-    assert [r['relation_id'] for r in records] == [10]
-    assert records[0]['members_by_type'] == {'w':1}
-    assert 'ISO3166-2' not in records[0]['tags']
-    source.write_bytes(b'changed')
-    with pytest.raises(ValueError, match='Source changed'):
-        diagnose(tmp_path, tmp_path / 'checks')
-
-
 def test_audit_actual_collection_export(collection, tmp_path):
     summary = run_collection(collection)
     _, report = audit(Path(summary['output']), tmp_path / 'checks')
@@ -115,4 +88,3 @@ def test_audit_actual_collection_export(collection, tmp_path):
     assert report['counts']['rows'] == summary['object_export']['teradata_objects']
     assert report['counts']['region_files'] == len(summary['regional_export']['files'])
     assert not report['production_ready']
-

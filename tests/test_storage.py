@@ -1,23 +1,16 @@
 import csv
 import sqlite3
-from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
+from helpers import row
 
+from poi_osm.objects import export_objects
 from poi_osm.storage import Registry, check_quality
-
 
 MAPPING = {"bakery": ["shop"], "hotel": ["tourism"]}
 QUALITY = {"allow_empty": False, "max_unassigned_fraction": 0.1,
            "max_count_drop_fraction": 0.3, "max_region_drop_fraction": 0.4}
-
-
-def row(object_id="1", tag="bakery", name="Булочная; №1", code="RU-TST", osm_type="node"):
-    return {"osm_id": object_id, "osm_type": osm_type, "tag": tag, "point_name": name,
-            "lon": 1.0, "lat": 2.0, "wkt": "POINT (1 2)", "region_name": "Тест",
-            "region_code": code, "region_id": "test", "country": "Россия", "address": "{}",
-            "osm_key": MAPPING[tag][0], "osm_value": tag}
 
 
 def snapshot(tmp_path, name, rows, date, previous=None):
@@ -96,35 +89,30 @@ def test_exports_csv_unicode_bom_quotes_null_and_parquet(tmp_path):
                           "2026-02-01", first_path)
     output = tmp_path / "output"
     output.mkdir()
-    second.export(output, ["RU-TST"], parquet=True)
-    csv_path = output / "full" / "RU-TST.csv"
+    export_objects(second.db,output,parquet=True)
+    csv_path = output / "poi_teradata.csv"
     assert csv_path.read_bytes().startswith(b"\xef\xbb\xbf")
     with csv_path.open(encoding="utf-8-sig", newline="") as stream:
         values = list(csv.DictReader(stream, delimiter=";"))
     assert len(values) == 1
     assert values[0]["point_name"] == "Название; с \"кавычками\"\nи строкой"
     assert values[0]["lon"] == "1.0"
-    full = pq.read_table(output / "all_russia.parquet")
+    full = pq.read_table(output / "poi_teradata.parquet")
     assert full.num_rows == 1
     assert full.column("osm_id").to_pylist() == ["1"]
-    with (output / "delta" / "deleted_poi.csv").open(encoding="utf-8-sig", newline="") as stream:
-        deleted = list(csv.DictReader(stream, delimiter=";"))
-    assert deleted[0]["osm_id"] == "2"
-    assert deleted[0]["point_name"] == ""
+    deleted=second.db.execute("SELECT osm_id,point_name FROM poi WHERE record_status='DELETED'").fetchone()
+    assert deleted==('2',None)
     second.close()
 
 
-def test_unassigned_quarantine_not_asserted_as_russian_parquet(tmp_path):
-    store, _ = snapshot(tmp_path, "quarantine", [row(), {**row("2", code=""), "country": None}], "2026-01-01")
-    output = tmp_path / "output"
-    output.mkdir()
-    store.export(output, ["RU-TST"], parquet=True)
-    assert store.metrics()["total"] == 2
-    assert pq.read_table(output / "all_russia.parquet").num_rows == 1
-    with (output / "full/unassigned.csv").open(encoding="utf-8-sig", newline="") as stream:
-        unassigned = list(csv.DictReader(stream, delimiter=";"))
-    assert len(unassigned) == 1
-    assert unassigned[0]["country"] == ""
+def test_unassigned_export_keeps_null_country_and_blank_region(tmp_path):
+    store,_=snapshot(tmp_path,'quarantine',[row(),{**row('2',code=''),'country':None}],'2026-01-01')
+    output=tmp_path/'export'
+    export_objects(store.db,output)
+    records=pq.read_table(output/'poi_teradata.parquet').to_pylist()
+    assert len(records)==2
+    unknown=next(record for record in records if record['osm_id']=='2')
+    assert unknown['country'] is None and unknown['region_code']==''
     store.close()
 
 

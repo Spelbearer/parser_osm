@@ -2,20 +2,19 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import csv
-from datetime import datetime, timezone
 import json
 import logging
 import math
-from pathlib import Path
 import re
 import shutil
 import sqlite3
-import sys
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 from pyproj import Geod
@@ -23,8 +22,8 @@ from shapely import STRtree, points
 from shapely.geometry import Polygon, box
 
 from .classification import CONFIG
-from .collection_boundaries import split_dateline
-from .runtime import atomic_json
+from .geography import split_dateline
+from .runtime import atomic_json, configure_utf8
 from .sources import _hash_file
 
 LOG = logging.getLogger(__name__)
@@ -307,6 +306,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
 
 
 def main(argv=None):
+    configure_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('run',type=Path,help='Completed internal run or reduced Teradata package')
     parser.add_argument('--output',type=Path,required=True,help='Local folder in which ZIP archives and run reports are saved')
@@ -322,6 +322,6 @@ def main(argv=None):
 if __name__=='__main__':
     try: raise SystemExit(main())
     except KeyboardInterrupt: raise SystemExit(130)
-    except Exception as error:
+    except Exception:
         LOG.exception('KML export failed; previous ZIP retained')
         raise SystemExit(1)

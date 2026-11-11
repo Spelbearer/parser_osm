@@ -1,18 +1,17 @@
 import csv
 import json
-from pathlib import Path
 import xml.etree.ElementTree as ET
 import zipfile
+from pathlib import Path
 
 import numpy as np
-from pyproj import Geod
 import pytest
-from shapely import STRtree,points
+from helpers import run_collection
+from pyproj import Geod
+from shapely import STRtree, points
 
-from poi_osm.kml import build,circle,neighbors,validate,NS
+from poi_osm.kml import NS, build, circle, neighbors, validate
 from poi_osm.teradata_export import export
-from test_collection import collection,run_collection
-from test_pipeline import project
 
 GEOD = Geod(ellps='WGS84')
 BASE = {'radius_m':60,'min_count':5,'count_mode':'distinct_names','points_scope':'all_named',

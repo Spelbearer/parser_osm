@@ -6,12 +6,19 @@ import osmium
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from helpers import (
+    boundaries,
+    configure,
+    confirm_collection,
+    part,
+    run_collection,
+    write_json,
+)
 
 from poi_osm.classification import CONFIG, Classifier, default_classifier
 from poi_osm.extract import extract_pois
+from poi_osm.objects import export_objects
 from poi_osm.storage import Registry
-from test_extract import boundaries
-from test_pipeline import project, configure, write_json, invoke, manifest
 
 
 @pytest.mark.parametrize("tags,tag,sub,evidence", [
@@ -86,37 +93,36 @@ def test_real_pbf_classification_csv_parquet_and_original_tags(tmp_path):
     store.compare(None)
     output = tmp_path / 'output'
     output.mkdir()
-    store.export(output, ['RU-TST'], True)
-    with (output / 'full/RU-TST.csv').open(encoding='utf-8-sig',newline='') as stream:
+    export_objects(store.db,output)
+    with (output / 'poi_teradata.csv').open(encoding='utf-8-sig',newline='') as stream:
         rows = {row['osm_id']:row for row in csv.DictReader(stream,delimiter=';')}
-    assert rows['1']['tag'] == 'outpost'
-    assert rows['1']['osm_key'] == 'shop'
+    assert rows['1']['primary_tag'] == 'outpost'
+    assert rows['1']['primary_osm_key'] == 'shop'
     assert rows['1']['chain_name'] == 'Ozon'
     assert rows['1']['is_chain'] == '1'
     assert rows['2']['telecom_type'] == 'Ремонт телефонов'
     assert rows['3']['is_chain'] == ''
-    table = pq.read_table(output / 'all_russia.parquet')
+    table = pq.read_table(output / 'poi_teradata.parquet')
     assert table.schema.field('is_telecom').type == pa.bool_()
     assert table.schema.field('is_chain').type == pa.bool_()
     assert {r['osm_id']:r['is_chain'] for r in table.to_pylist()} == {'1':True,'2':None,'3':None}
     store.close()
 
 
-def test_custom_categories_are_applied_and_contract_change_preserves_previous(project):
-    taxonomy = {"tags":{"bakery":{"category":"Моя группа", "subcategory":"Булочные"},
-                         "hotel":{"category":"Туризм", "subcategory":"Гостиницы"}}}
-    rules = project / 'config/custom_categories.json'
-    write_json(rules, taxonomy)
-    configure(project, categories='config/custom_categories.json')
-    invoke(project)
-    original = manifest(project)
-    table = pq.read_table(Path(original['output']) / 'all_russia.parquet')
-    assert {r['category'] for r in table.to_pylist()} == {'Моя группа','Туризм'}
-    taxonomy['tags']['bakery']['category'] = 'Изменённая группа'
-    write_json(rules, taxonomy)
-    result = invoke(project, succeeds=False)
-    assert 'separate project_root' in result.stderr
-    assert manifest(project)['run_id'] == original['run_id']
+def test_custom_categories_are_applied_and_contract_change_preserves_previous(collection):
+    for stem,code,west,east,extra in [('alpha','RU-AA',0,10,2),('beta','RU-BB',10,20,3)]:
+        part(collection/f'inputs/{stem}-261108.osm.pbf',code,west,east,extra,shared_tag='hotel')
+    taxonomy={'tags':{'bakery':{'category':'Моя группа','subcategory':'Булочные'},
+                      'hotel':{'category':'Туризм','subcategory':'Гостиницы'}}}
+    rules=collection/'config/custom_categories.json';write_json(rules,taxonomy)
+    configure(collection,categories='config/custom_categories.json');confirm_collection(collection)
+    original=run_collection(collection,'--production')
+    table=pq.read_table(Path(original['output'])/'poi_teradata.parquet')
+    assert {r['primary_category'] for r in table.to_pylist()}=={'Моя группа','Туризм'}
+    taxonomy['tags']['bakery']['category']='Изменённая группа';write_json(rules,taxonomy)
+    failed=run_collection(collection,'--production',ok=False)
+    assert 'changed' in failed.stderr
+    assert json.loads((collection/'results/state/last_success.json').read_text())['run_id']==original['run_id']
 
 
 def test_invalid_taxonomy_and_chain_aliases_rejected():
@@ -149,15 +155,13 @@ def test_editing_telecom_dictionary_changes_membership_and_labels():
     assert row['category'] == 'Моя целевая группа'
 
 
-def test_custom_telecom_file_is_used_by_cli(project):
-    rules = {'category':'Мой сегмент', 'direct_tags':{}, 'indirect_tags':{'bakery':'Пекарни для кампании'}}
-    path = project / 'config/my_telecom.json'
-    write_json(path, rules)
-    configure(project, telecom='config/my_telecom.json')
-    invoke(project)
-    table = pq.read_table(Path(manifest(project)['output']) / 'all_russia.parquet')
-    bakery = [r for r in table.to_pylist() if r['tag'] == 'bakery']
-    assert all(r['is_telecom'] is True and r['telecom_type'] == 'Пекарни для кампании' for r in bakery)
+def test_custom_telecom_file_is_used_by_collection(collection):
+    rules={'category':'Мой сегмент','direct_tags':{},'indirect_tags':{'bakery':'Пекарни для кампании'}}
+    write_json(collection/'config/my_telecom.json',rules)
+    configure(collection,telecom='config/my_telecom.json')
+    result=run_collection(collection)
+    table=pq.read_table(Path(result['output'])/'poi_teradata.parquet')
+    assert all(r['is_telecom'] is True and r['telecom_type']=='Пекарни для кампании' for r in table.to_pylist())
 
 
 def test_telecom_rules_reject_overlapping_membership():

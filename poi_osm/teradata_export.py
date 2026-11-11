@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import date, datetime, timezone
 import json
 import logging
-from pathlib import Path
 import sqlite3
 import uuid
+from datetime import date, datetime, timezone
+from pathlib import Path
 
 from .classification import CONFIG
 from .region_files import split_regions
-from .runtime import atomic_json
+from .runtime import atomic_json, configure_utf8
 from .selection import TERADATA_FIELDS
 from .sources import _hash_file
 
@@ -125,6 +125,7 @@ def export(run, output_root, profile_path):
 
 
 def main(argv=None):
+    configure_utf8()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('run',type=Path)
     parser.add_argument('--output',required=True,type=Path)

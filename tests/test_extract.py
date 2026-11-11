@@ -1,24 +1,12 @@
 import json
-from pathlib import Path
 
 import osmium
 import pytest
+from helpers import boundaries
 from shapely.geometry import Point, Polygon, mapping
 
 from poi_osm.extract import extract_pois, matching_categories
 from poi_osm.geography import RegionIndex, prepare_boundaries
-
-
-def boundaries(tmp_path):
-    registry = tmp_path / "regions.json"
-    registry.write_text(json.dumps({"source": "test fixture", "coverage_id": "test",
-                                   "regions": [{"region_code": "RU-TST", "region_name": "Тест"}]}))
-    geojson = tmp_path / "regions.geojson"
-    geojson.write_text(json.dumps({"type": "FeatureCollection", "source": "test fixture",
-                                  "coverage_id": "test", "features": [{"type": "Feature",
-                                  "properties": {"region_code": "RU-TST"},
-                                  "geometry": mapping(Polygon([(0, 0), (10, 0), (10, 10), (0, 10)]))}]}))
-    return RegionIndex(geojson, registry), geojson, registry
 
 
 def write_pbf(path, broken=False):

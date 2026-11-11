@@ -10,12 +10,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import osmium
-from .runtime import cleanup_index
-from .classification import default_classifier
 from osmium.geom import WKBFactory
 from shapely import transform, wkb
 from shapely.geometry import Point
 from shapely.ops import unary_union
+
+from .classification import default_classifier
+from .runtime import cleanup_index
 
 
 def matching_categories(tags: dict, mapping: dict[str, list[str]]):

@@ -4,8 +4,6 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-from importlib.metadata import version
-from itertools import groupby
 import json
 import logging
 import re
@@ -17,15 +15,17 @@ import time
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
+from importlib.metadata import version
+from itertools import groupby
 from pathlib import Path
 
 from .classification import CONFIG
-from .collection_boundaries import combine_boundaries
 from .config import contract_hash, load_settings
-from .geography import RegionIndex
+from .geography import RegionIndex, combine_boundaries
+from .objects import export_objects
 from .region_files import split_regions
-from .runtime import atomic_json, process_lock, cleanup_index
-from .sources import obtain_source, _hash_file
+from .runtime import atomic_json, cleanup_index, configure_utf8, process_lock
+from .sources import _hash_file, obtain_source
 from .storage import FIELDS, Registry, check_quality
 
 REPO=Path(__file__).resolve().parents[1]
@@ -105,7 +105,7 @@ def inspect_sources(folder,profile,source_date=None):
 
 
 def worker_contract(settings):
-    code={name:_hash_file(Path(__file__).parent/name) for name in ['collection_worker.py','extract.py','geography.py','collection_boundaries.py','classification.py']}
+    code={name:_hash_file(Path(__file__).parent/name) for name in ['collection_worker.py','extract.py','geography.py','classification.py']}
     payload={k:settings[k] for k in ['mapping','name_priority','category_rules','chain_rules','telecom_rules']}
     payload.update(code=code,fields=FIELDS,line_policy=settings.get('line_policy','midpoint'),
                    toolchain={k:version(k) for k in ['osmium','shapely']},python=list(sys.version_info[:2]))
@@ -291,9 +291,9 @@ def run(args):
             report.update(metrics=metrics,duplicate_category_rows_removed=duplicates,unresolved_objects=unresolved,
                           parsing={k:sum(job['parsing'].get(k,0) for job in jobs) for k in
                                    ['processed_nodes','processed_ways','processed_relations','processed_osm_objects','poi_records','unresolved_objects','skipped_poi_records']})
-            objects=store.export(stage,[r['region_code'] for r in registry['regions']],settings.get('write_parquet',True),selection_rules=settings['primary_rules'])
+            objects=None if args.registry_only else export_objects(store.db,stage,parquet=settings.get('write_parquet',True),selection_rules=settings['primary_rules'])
             store.close();store=None
-            regional=split_regions(stage/'poi_teradata.csv',stage/'regions',registry,profile.get('max_rows_per_region_file',50000))
+            regional=None if args.registry_only else split_regions(stage/'poi_teradata.csv',stage/'regions',registry,profile.get('max_rows_per_region_file',50000))
             incomplete=bool(unresolved or (not approved_index and boundary_report['missing_region_codes'])
                             or metrics['unassigned_fraction']>settings['quality']['max_unassigned_fraction'])
             status='SUCCESS' if args.production else ('COLLECTION_PREVIEW_INCOMPLETE' if incomplete else 'COLLECTION_PREVIEW_SUCCESS')
@@ -306,7 +306,7 @@ def run(args):
             destination.parent.mkdir(parents=True,exist_ok=True)
             stage.replace(destination)
             if args.production:atomic_json(state,report)
-            logging.info('%s: %s Teradata objects; %s regional files; output=%s',status,objects['teradata_objects'],len(regional['files']),destination)
+            logging.info('%s: registry=%s; output=%s',status,report['registry'],destination)
             print(json.dumps(report,ensure_ascii=False,indent=2))
             return 0
         except BaseException as error:
@@ -319,8 +319,7 @@ def run(args):
 
 
 def main(argv=None):
-    for stream in (sys.stdout,sys.stderr):
-        if stream and hasattr(stream,'reconfigure'):stream.reconfigure(encoding='utf-8',errors='backslashreplace')
+    configure_utf8()
     cli=argparse.ArgumentParser(description='Local federal-district collection with resumable workers and regional CSV parts')
     cli.add_argument('folder',type=Path)
     cli.add_argument('--output',type=Path,default=Path('russia_output'))
@@ -328,6 +327,7 @@ def main(argv=None):
     cli.add_argument('--profile',type=Path,default=CONFIG/'collection.json')
     cli.add_argument('--source-date',help='Verified date for headerless PBFs; never inferred from names')
     cli.add_argument('--check',action='store_true')
+    cli.add_argument('--registry-only',action='store_true',help=argparse.SUPPRESS)
     cli.add_argument('--boundary-supplement',type=Path,help='Recovered candidate GeoJSON matching the same source hashes; preview only')
     cli.add_argument('--require-cache',action='store_true',help='Refuse any PBF extraction; all workers must already have valid checkpoints')
     cli.add_argument('--production',action='store_true',help='Requires reviewed boundaries and explicit complete-snapshot confirmation')
