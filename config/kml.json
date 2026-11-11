@@ -1,0 +1,13 @@
+{
+  "radius_m": 60,
+  "min_count": 5,
+  "count_mode": "distinct_names",
+  "points_scope": "all_named",
+  "circle_vertices": 72,
+  "max_features_per_file": 10000,
+  "osm_types": ["node", "way"],
+  "include_unassigned": false,
+  "telecom_only": false,
+  "exclude_chains": false,
+  "regions": null
+}

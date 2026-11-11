@@ -151,3 +151,11 @@ logs/                          журналы с traceback при ошибках
 [Архитектура и ограничения](docs/architecture.md): память, диск, геометрии, область покрытия, повторный запуск и публикация. Нагрузочный тест всей России и проверка на настоящей Windows-машине не заменяются тестами в Linux.
 
 Данные: © OpenStreetMap contributors, [ODbL](https://www.openstreetmap.org/copyright). Учитывайте также лицензию выбранного источника границ.
+
+## KML-слои и ZIP
+
+[Формирование KML](docs/kml.md): региональные слои всех названных POI и кругов радиусом 60 м с минимум пятью разными названиями, упаковка проверенного ZIP в заданную папку. Работает из готового production-набора, без PBF и подключения к Teradata. Настройки: `config/kml.json`.
+
+```powershell
+.\.venv\Scripts\python.exe -m poi_osm.kml "D:\osm_results\runs\20261111T150943-6d13d9fc" --output "D:\osm_results\kml"
+```
