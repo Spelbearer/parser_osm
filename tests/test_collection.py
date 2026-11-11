@@ -208,3 +208,55 @@ def test_different_polygons_for_same_code_are_reported_not_arbitrarily_selected(
     assert index.lookup(1,1) is None
     assert report['conflicting_region_codes']==['RU-AA']
     assert report['missing_region_codes']==['RU-AA']
+
+
+def supplement(root, sources, *, code='RU-BB'):
+    path=root/'supplement.geojson'
+    write_json(path, {'type':'FeatureCollection','source':'synthetic recovery','review_required':True,
+                     'source_sha256':{s['extract']:s['sha256'] for s in sources},
+                     'features':[{'type':'Feature','properties':{'region_code':code},
+                                  'geometry':{'type':'Polygon','coordinates':[[[10,0],[20,0],[20,10],[10,10],[10,0]]]}}]})
+    return path
+
+
+def test_recovered_supplement_reassigns_cached_pois_without_extraction(collection):
+    # A valid polygon exists in this extract, but it lacks the configured subject code.
+    part(collection/'inputs/beta-261108.osm.pbf','RU-XX',10,20,3)
+    first=run_collection(collection)
+    assert first['status']=='COLLECTION_PREVIEW_INCOMPLETE'
+    assert first['boundary_report']['missing_region_codes']==['RU-BB']
+    assert first['metrics']['by_region']['']==1
+    saved=(Path(first['output'])/'summary.json').read_bytes()
+    path=supplement(collection,first['sources'])
+    second=run_collection(collection,'--boundary-supplement',str(path),'--require-cache')
+    assert second['cached_extracts']==2
+    assert second['status']=='COLLECTION_PREVIEW_SUCCESS'
+    assert second['boundary_report']['missing_region_codes']==[]
+    assert second['boundary_report']['candidate_region_count']==2
+    assert second['object_export']['teradata_objects']==first['object_export']['teradata_objects']==3
+    assert second['metrics']['by_region']=={'RU-AA':2,'RU-BB':1}
+    assert second['metrics']['unassigned_fraction']==0
+    assert second['boundary_supplement']['review_required']
+    assert not second['production'] and not second['boundaries_reviewed']
+    assert (Path(first['output'])/'summary.json').read_bytes()==saved
+    assert not (collection/'results/state/last_success.json').exists()
+    assert len(list((collection/'results/cache').glob('*/attempt-*')))==2
+
+
+def test_cache_only_refuses_missing_checkpoint(collection):
+    failed=run_collection(collection,'--require-cache',ok=False)
+    assert 'prevents PBF extraction' in failed.stderr
+    assert not (collection/'results/cache').exists()
+
+
+def test_supplement_provenance_checked_before_workers(collection):
+    path=supplement(collection,[])
+    failed=run_collection(collection,'--boundary-supplement',str(path),ok=False)
+    assert 'sources differ' in failed.stderr
+    assert not (collection/'results/cache').exists()
+
+
+def test_unreviewed_supplement_not_accepted_in_production(collection):
+    failed=run_collection(collection,'--production','--boundary-supplement',str(collection/'supplement.geojson'),ok=False)
+    assert 'unreviewed candidates' in failed.stderr
+    assert not (collection/'results').exists()

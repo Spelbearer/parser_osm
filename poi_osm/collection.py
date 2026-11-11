@@ -112,7 +112,7 @@ def worker_contract(settings):
     return hashlib.sha256(json.dumps(payload,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
 
 
-def worker_for(source,settings,config,output):
+def worker_for(source,settings,config,output,*,require_cache=False):
     key=hashlib.sha256((source['sha256']+Path(source['path']).name+worker_contract(settings)).encode()).hexdigest()
     cache=output/'cache'/key
     pointer=cache/'current.json'
@@ -128,6 +128,8 @@ def worker_for(source,settings,config,output):
                 return result,True
         except (OSError,ValueError,KeyError):
             pass
+    if require_cache:
+        raise ValueError(f'No valid cached extraction for {source["extract"]}; --require-cache prevents PBF extraction')
     job=cache/('attempt-'+uuid.uuid4().hex[:12])
     job.mkdir(parents=True)
     atomic_json(job/'source.json',source)
@@ -153,6 +155,8 @@ def worker_for(source,settings,config,output):
 
 
 def run(args):
+    if args.production and args.boundary_supplement:
+        raise ValueError('Boundary supplements are unreviewed candidates; use preview, then review complete boundaries for production')
     settings=load_settings(args.config)
     profile=profile_from(args.profile)
     if profile.get('coverage_id')!=settings['coverage_id']:
@@ -200,13 +204,33 @@ def run(args):
                 raise ValueError('Coverage, filters or boundaries changed; choose a separate output directory for a new baseline')
             if previous and report['source_date']<previous['source_date']:
                 raise ValueError('Collection snapshot is older than previous successful snapshot')
+            supplement_job=None
+            if args.boundary_supplement:
+                path=args.boundary_supplement.resolve()
+                content=path.read_bytes()
+                document=json.loads(content)
+                expected_sources={source['extract']:source['sha256'] for source in sources}
+                if document.get('source_sha256')!=expected_sources:
+                    raise ValueError('Boundary supplement sources differ from this collection snapshot')
+                if document.get('type')!='FeatureCollection' or not document.get('features'):
+                    raise ValueError('Boundary supplement must contain candidate features')
+                codes=[feature.get('properties',{}).get('region_code') for feature in document['features']]
+                known={region['region_code'] for region in registry['regions']}
+                if any(code not in known for code in codes) or len(codes)!=len(set(codes)):
+                    raise ValueError('Boundary supplement contains unknown or duplicate region codes')
+                supplement=stage/'supplement';supplement.mkdir()
+                (supplement/'candidate.geojson').write_bytes(content)
+                supplement_job={'job':str(supplement)}
+                report['boundary_supplement']={'path':str(path),'sha256':hashlib.sha256(content).hexdigest(),
+                                               'region_codes':sorted(codes),'review_required':True}
+            report['cache_only']=args.require_cache
             jobs=[];reused=0
             for number,source in enumerate(sources,1):
                 logging.info('PART %s/%s: %s',number,len(sources),source['extract'])
-                result,cached=worker_for(source,settings,args.config,output)
+                result,cached=worker_for(source,settings,args.config,output,require_cache=args.require_cache)
                 jobs.append(result);reused+=cached
                 atomic_json(stage/'progress.json',{'completed_extracts':number,'total_extracts':len(sources),'cached_extracts':reused})
-            candidate_index,boundary_report=combine_boundaries(jobs,registry,stage)
+            candidate_index,boundary_report=combine_boundaries(jobs+([supplement_job] if supplement_job else []),registry,stage)
             region_index=approved_index or candidate_index
             report['boundary_report']=boundary_report
             report['cached_extracts']=reused
@@ -295,6 +319,8 @@ def main(argv=None):
     cli.add_argument('--profile',type=Path,default=CONFIG/'collection.json')
     cli.add_argument('--source-date',help='Verified date for headerless PBFs; never inferred from names')
     cli.add_argument('--check',action='store_true')
+    cli.add_argument('--boundary-supplement',type=Path,help='Recovered candidate GeoJSON matching the same source hashes; preview only')
+    cli.add_argument('--require-cache',action='store_true',help='Refuse any PBF extraction; all workers must already have valid checkpoints')
     cli.add_argument('--production',action='store_true',help='Requires reviewed boundaries and explicit complete-snapshot confirmation')
     args=cli.parse_args(argv)
     logging.basicConfig(level=logging.INFO,format='%(asctime)s | %(levelname)s | %(message)s',force=True)
