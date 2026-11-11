@@ -1,0 +1,21 @@
+{
+  "osm_id_format": "typed",
+  "fields": [
+    "osm_id",
+    "point_name",
+    "lon",
+    "lat",
+    "wkt",
+    "region_name",
+    "primary_category",
+    "primary_subcategory",
+    "primary_osm_key",
+    "primary_osm_value",
+    "is_telecom",
+    "telecom_type",
+    "is_chain",
+    "chain_name",
+    "update_date",
+    "record_status"
+  ]
+}

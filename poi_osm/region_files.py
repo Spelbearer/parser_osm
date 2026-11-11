@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 
-def split_regions(source,output,registry,max_rows=50000):
+def split_regions(source,output,registry,max_rows=50000,*,fieldnames=None,transform=None):
     if not isinstance(max_rows,int) or isinstance(max_rows,bool) or not 1<=max_rows<=1000000:
         raise ValueError('max_rows_per_region_file must be between 1 and 1000000')
     output=Path(output)
@@ -15,6 +15,7 @@ def split_regions(source,output,registry,max_rows=50000):
         reader=csv.DictReader(stream,delimiter=';'); fields=reader.fieldnames
         if not fields or 'region_code' not in fields:
             raise ValueError('Source CSV has no region_code')
+        fields=fieldnames or fields
         def open_part(code,name):
             if code and not all(c.isalnum() or c in '-_' for c in code):
                 raise ValueError('Unsafe region code')
@@ -33,7 +34,7 @@ def split_regions(source,output,registry,max_rows=50000):
                     open_part(code,name)
                 if handles[code][2]['rows']>=max_rows:
                     handles[code][0].close();open_part(code,name)
-                handles[code][1].writerow(row);handles[code][2]['rows']+=1
+                handles[code][1].writerow(transform(row) if transform else row);handles[code][2]['rows']+=1
                 counts[code]=counts.get(code,0)+1
             for code,name in sorted(known.items()):
                 if code not in handles:

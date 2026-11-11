@@ -232,6 +232,15 @@ def run(args):
                 atomic_json(stage/'progress.json',{'completed_extracts':number,'total_extracts':len(sources),'cached_extracts':reused})
             candidate_index,boundary_report=combine_boundaries(jobs+([supplement_job] if supplement_job else []),registry,stage)
             region_index=approved_index or candidate_index
+            if approved_index:
+                atomic_json(stage/'approved_regions.json',registry)
+                shutil.copyfile(settings['boundaries'],stage/'approved_boundaries.geojson')
+                report['extraction_candidate_boundary_report']=boundary_report
+                boundary_report={'candidate_region_count':len(approved_index.regions),
+                                 'missing_region_codes':[],'conflicting_region_codes':[],
+                                 'invalid_boundary_codes':{},'excluded_boundary_codes':[],
+                                 'nested_region_adjustments':[],'review_required':False,
+                                 'boundary_kind':'approved','source':str(settings['boundaries'])}
             report['boundary_report']=boundary_report
             report['cached_extracts']=reused
             report['worker_jobs']=[job['job'] for job in jobs]
