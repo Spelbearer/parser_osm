@@ -1,6 +1,7 @@
 {
-  "osm_id_format": "typed",
+  "osm_id_format": "numeric_with_type",
   "fields": [
+    "osm_type",
     "osm_id",
     "point_name",
     "lon",

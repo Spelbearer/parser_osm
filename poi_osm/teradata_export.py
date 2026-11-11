@@ -35,6 +35,8 @@ class Projection:
         kind, ident = source['osm_type'], source['osm_id']
         if kind not in {'node','way','relation'} or not ident.isascii() or not ident.isdigit() or int(ident) <= 0:
             raise ValueError('Invalid source OSM identity')
+        if self.mode == 'numeric_with_type' and int(ident) > 9223372036854775807:
+            raise ValueError('OSM ID exceeds signed BIGINT range')
         result = {f:source[f] for f in self.fields}
         if self.mode == 'typed':
             result['osm_id'] = f'{kind}/{ident}'
@@ -61,7 +63,7 @@ def export(run, output_root, profile_path):
     dates = {'update_date','source_date','first_seen_date','last_seen_date'}
     booleans = {'is_telecom','is_chain'}
     schema = pa.schema([(f, pa.float64() if f in {'lon','lat'} else pa.date32() if f in dates else
-                         pa.bool_() if f in booleans else pa.string()) for f in projection.fields])
+                         pa.bool_() if f in booleans else pa.int64() if f == 'osm_id' and projection.mode == 'numeric_with_type' else pa.string()) for f in projection.fields])
     keys_path = output/'keys.sqlite'
     db = sqlite3.connect(keys_path)
     db.execute('CREATE TABLE keys(kind TEXT,id TEXT,PRIMARY KEY(kind,id)) WITHOUT ROWID')
@@ -84,7 +86,7 @@ def export(run, output_root, profile_path):
                 for f,value in selected.items():
                     if f in booleans and value not in {'','0','1'}:
                         raise ValueError(f'Invalid boolean value in {f}')
-                    record[f] = (None if value == '' else float(value) if f in {'lon','lat'} else date.fromisoformat(value)
+                    record[f] = (None if value == '' else int(value) if f == 'osm_id' and projection.mode == 'numeric_with_type' else float(value) if f in {'lon','lat'} else date.fromisoformat(value)
                                  if f in dates else bool(int(value)) if f in booleans else value)
                 batch.append(record); total += 1
                 if len(batch) >= 5000:

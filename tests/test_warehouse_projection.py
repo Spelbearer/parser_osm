@@ -99,7 +99,10 @@ def test_prepare_and_run_cli_makes_reduced_production_package(collection,tmp_pat
     assert package['status']=='TERADATA_EXPORT_SUCCESS'
     assert package['production'] and package['boundaries_reviewed'] and package['production_ready']
     assert package['total_rows']==3
-    assert set(package['excluded_fields'])==DROP
-    assert 'osm_type' not in rows(Path(package['output'])/'poi_teradata.csv')[0]
+    assert set(package['excluded_fields'])==DROP-{'osm_type'}
+    assert 'osm_type' in rows(Path(package['output'])/'poi_teradata.csv')[0]
+    assert all(r['osm_id'].isdigit() for r in rows(Path(package['output'])/'poi_teradata.csv'))
+    assert len(package['columns'])==17
+    assert str(pq.read_schema(Path(package['output'])/'poi_teradata.parquet').field('osm_id').type)=='int64'
     approved = json.loads(Path(report['teradata_profile']).read_text())
-    assert approved['osm_id_format']=='typed'
+    assert approved['osm_id_format']=='numeric_with_type'

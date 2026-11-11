@@ -66,15 +66,15 @@
 .\.venv\Scripts\python.exe -m poi_osm.teradata_export "D:\osm_results\runs\<run_id>" --output "D:\osm_results\teradata"
 ```
 
-Файл **`config/teradata_export.json`** содержит редактируемый список `fields` и формат ключа. По умолчанию исключены 19 согласованных полей. Остаются 16 колонок:
+Файл **`config/teradata_export.json`** содержит редактируемый список `fields` и формат ключа. По умолчанию исключены 18 полей: по последнему решению `osm_type` сохранён рядом с числовым `osm_id`. Остаются 17 колонок:
 
 ```text
-osm_id, point_name, lon, lat, wkt, region_name,
+osm_type, osm_id, point_name, lon, lat, wkt, region_name,
 primary_category, primary_subcategory, primary_osm_key, primary_osm_value,
 is_telecom, telecom_type, is_chain, chain_name, update_date, record_status
 ```
 
-`osm_id_format: "typed"` записывает **`node/123` / `way/123`** в `osm_id`; в Teradata это VARCHAR, а не числовая колонка. Уникальность сохраняется без отдельного `osm_type`. Если требуется исходное число, используйте `numeric_with_type` и добавьте `osm_type` в `fields`: одинаковые номера разных типов нельзя объединять. Пример схемы и MERGE для текстового ключа: [teradata_compact.sql](teradata_compact.sql). Он не меняет существующую таблицу и программно не исполняется.
+`osm_id_format: "numeric_with_type"` сохраняет исходное число в `osm_id` и тип объекта в `osm_type`. В Parquet `osm_id` имеет тип int64, в SQL — BIGINT; ключ таблицы **`(osm_type, osm_id)`**. `node/123` и `way/123` остаются разными строками. При необходимости альтернативный режим `typed` записывает `node/123` в один текстовый столбец. Пример схемы и MERGE для профиля по умолчанию: [teradata_compact.sql](teradata_compact.sql). Он не меняет существующую таблицу и программно не исполняется.
 
 Внутри `D:\osm_results\teradata\teradata-<timestamp>-<id>` находятся `poi_teradata.csv`, `poi_teradata.parquet`, региональные CSV с теми же сокращёнными колонками, `regions_index.csv`, зафиксированный `profile.json` и `summary.json`. В региональном индексе остаются коды регионов для навигации; в строках POI они удалены. Объекты без региона сохраняются отдельной частью и в общем файле. Метаданные, исключённые из загрузки, остаются в исходном production-реестре и полных внутренних файлах.
 
