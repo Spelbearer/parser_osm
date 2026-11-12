@@ -26,6 +26,7 @@ from .config import load_settings
 from .geography import RegionIndex
 from .kml import build as build_kml
 from .objects import export_objects
+from .region_dictionary import RegionDictionary
 from .region_files import split_regions
 from .runtime import atomic_json, configure_utf8, process_lock
 from .sources import _hash_file
@@ -210,7 +211,7 @@ def configure_product(root, settings_path, profile_path, boundary, input_folder)
     shutil.copyfile(CONFIG/'kml.json',root/'config/kml.json')
     config={'version':1,'input_folder':str(Path(input_folder).resolve()),'settings':'config/settings.json',
             'collection_profile':'config/collection.json','export_profile':'config/teradata_export.json',
-            'kml_config':'config/kml.json','keep_results':1,'logs_to_keep':10}
+            'kml_config':'config/kml.json','region_dictionary':str(CONFIG/'region_dictionary.json'),'keep_results':1,'logs_to_keep':10}
     atomic_json(root/'product.json',config)
     return config
 
@@ -256,11 +257,14 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     LOG.info('Preparing exports from the saved registry')
     with closing(sqlite3.connect(Path(registry).resolve().as_uri()+'?mode=ro',uri=True)) as db:
         objects=export_objects(db,source,selection_rules=settings['primary_rules'],parquet=False)
-    regional=split_regions(source/'poi_teradata.csv',source/'regions',regions)
+    dictionary=RegionDictionary(root/config['region_dictionary'] if config.get('region_dictionary') else CONFIG/'region_dictionary.json',regions)
+    region_mapping=dictionary.apply_csv(source/'poi_teradata.csv')
+    display_regions=dictionary.registry(regions)
+    regional=split_regions(source/'poi_teradata.csv',source/'regions',display_regions)
     source_info={**manifest,'status':'SUCCESS','production':True,'boundaries_reviewed':True,'complete_coverage_verified':True,
-                 'object_export':objects,'regional_export':regional}
+                 'object_export':objects,'regional_export':regional,'region_mapping':region_mapping}
     atomic_json(source/'summary.json',source_info)
-    shutil.copyfile(settings['regions'],source/'approved_regions.json')
+    atomic_json(source/'approved_regions.json',display_regions)
     _,checks=audit(source,work/'checks')
     if not checks['file_checks_ok']: raise ValueError('Source audit failed')
     warehouse,export=export_warehouse(source,work/'warehouse',root/config['export_profile'])
@@ -269,6 +273,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
         shutil.move(str(warehouse/name),str(bundle/name))
     shutil.copyfile(warehouse/'regions_index.csv',bundle/'analysis/regions_index.csv')
     shutil.copyfile(warehouse/'profile.json',bundle/'analysis/export_profile.json')
+    dictionary.write_index(bundle/'analysis/region_mapping.csv',regions)
     if review and Path(review).is_file(): shutil.copyfile(review,bundle/'analysis/review.csv')
     checks['run']=str(root/'result/.state/registry.sqlite');atomic_json(bundle/'analysis/audit.json',checks)
     final_registry=root/'result/.state/registry.sqlite'
@@ -276,12 +281,14 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     if reuse and Path(reuse).is_file():
         try:
             candidate=read(reuse)
-            if candidate.get('source_csv_sha256')==_hash_file(source/'poi_teradata.csv') and candidate.get('config')==kml_config and candidate.get('status')=='KML_EXPORT_SUCCESS':
+            dictionary_matches=(not region_mapping['applicable_regions'] or (candidate.get('region_mapping') or {}).get('dictionary_sha256')==region_mapping['dictionary_sha256'])
+            if dictionary_matches and candidate.get('source_csv_sha256')==_hash_file(source/'poi_teradata.csv') and candidate.get('config')==kml_config and candidate.get('status')=='KML_EXPORT_SUCCESS':
                 archive=Path(candidate['archive'])
                 if archive.is_file():
                     with zipfile.ZipFile(archive) as existing:
                         archived=json.loads(existing.read('summary.json'))
-                        if existing.testzip() is None and archived.get('source_csv_sha256')==candidate['source_csv_sha256'] and archived.get('config')==kml_config:
+                        archived_dictionary_matches=(not region_mapping['applicable_regions'] or (archived.get('region_mapping') or {}).get('dictionary_sha256')==region_mapping['dictionary_sha256'])
+                        if archived_dictionary_matches and existing.testzip() is None and archived.get('source_csv_sha256')==candidate['source_csv_sha256'] and archived.get('config')==kml_config:
                             kml_report=archived
         except (OSError,ValueError,KeyError,RuntimeError,zipfile.BadZipFile):
             LOG.warning('Existing KML ZIP cannot be reused; rebuilding it from the registry')
@@ -291,7 +298,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
         archive=Path(kml_report['archive'])
     else: LOG.info('Reusing the verified KML archive without recalculating circles')
     kml_report={**kml_report,'source_run':str(final_registry),'output':str(root/'result/analysis'),
-                'archive':str(root/'result/poi_layers.zip'),'layers_kept':False,'layer_paths':'ZIP entries'}
+                'archive':str(root/'result/poi_layers.zip'),'layers_kept':False,'layer_paths':'ZIP entries','region_mapping':region_mapping}
     repack(archive,bundle/'poi_layers.zip',kml_report)
     atomic_json(bundle/'analysis/kml_summary.json',kml_report)
     copy_registry(registry,bundle/'.state/registry.sqlite')
@@ -306,7 +313,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
             'total_objects':export['total_rows'],'columns':export['columns'],'kml_counts':kml_report['counts'],
             'unassigned_objects':export['regional_export']['by_region'].get('',0),'file_checks_ok':True,
             'production_ready':True,'keep_results':1,'temporary_files_removed':False,
-            'metrics':manifest['metrics'],'source_files':len(manifest['sources'])}
+            'metrics':manifest['metrics'],'source_files':len(manifest['sources']),'region_mapping':region_mapping}
     atomic_json(bundle/'analysis/summary.json',report)
     return bundle,report
 
@@ -378,6 +385,7 @@ def validate_product(root, config):
     if not (settings.get('coverage_confirmed') is True and settings.get('boundaries_reviewed') is True):
         raise ValueError('Production needs the previously reviewed boundary configuration')
     RegionIndex(Path(settings['boundaries']),Path(settings['regions']))
+    RegionDictionary(root/config['region_dictionary'] if config.get('region_dictionary') else CONFIG/'region_dictionary.json',read(settings['regions']))
     return limit
 
 

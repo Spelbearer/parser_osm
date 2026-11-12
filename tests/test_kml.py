@@ -171,3 +171,18 @@ def test_full_run_and_reduced_warehouse_are_supported(collection,tmp_path):
     reduced=build(package,tmp_path/'kml-reduced',config_path)
     assert reduced['counts']==internal['counts']
     assert len(kml_nodes(reduced,'points'))==3
+
+
+def test_reduced_csv_with_ambiguous_region_names_is_not_guessed(tmp_path):
+    root=tmp_path/'source';root.mkdir()
+    with (root/'poi_teradata.csv').open('w',encoding='utf-8-sig',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=['osm_type','osm_id','point_name','lon','lat','region_name'],delimiter=';')
+        writer.writeheader();writer.writerow({'osm_type':'node','osm_id':'1','point_name':'Точка','lon':37,'lat':55,'region_name':'Один филиал'})
+    with (root/'regions_index.csv').open('w',encoding='utf-8-sig',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=['region_code','region_name'],delimiter=';');writer.writeheader()
+        writer.writerows([{'region_code':'RU-AA','region_name':'Один филиал'},{'region_code':'RU-BB','region_name':'Один филиал'}])
+    (root/'summary.json').write_text(json.dumps({'status':'SUCCESS','object_export':{'teradata_objects':1}}))
+    with pytest.raises(ValueError,match='Ambiguous region label'):
+        build(root,tmp_path/'out',config(tmp_path))
+    assert not (tmp_path/'out/last_success.json').exists()
+    assert not (tmp_path/'out/work').exists()

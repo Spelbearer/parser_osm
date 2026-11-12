@@ -31,7 +31,7 @@ NS = 'http://www.opengis.net/kml/2.2'
 ET.register_namespace('',NS)
 GEOD = Geod(ellps='WGS84')
 LABELS = {'point_name':'Название','osm_type':'Тип OSM','osm_id':'ID OSM','address':'Адрес',
-          'region_name':'Регион','primary_category':'Категория','primary_subcategory':'Подкатегория',
+          'region_name':'Регион','region_code':'Код региона','primary_category':'Категория','primary_subcategory':'Подкатегория',
           'primary_osm_key':'Ключ OSM','primary_osm_value':'Тег OSM','is_telecom':'Телефония',
           'telecom_type':'Тип телефонии','is_chain':'Крупная сеть','chain_name':'Название сети',
           'center_osm_type':'Тип OSM центра','center_osm_id':'ID OSM центра','radius_m':'Радиус, м',
@@ -129,7 +129,10 @@ class Layers:
         path.parent.mkdir(parents=True,exist_ok=True)
         stream = path.open('x',encoding='utf-8')
         stream.write(f'<?xml version="1.0" encoding="UTF-8"?><kml xmlns="{NS}"><Document>')
-        title = ET.Element('{'+NS+'}name'); title.text = clean(self.names.get(code,'Без региона')+' — '+{'circles':'Зоны скопления POI','points':'Точки POI'}[kind])
+        title = ET.Element('{'+NS+'}name')
+        display=self.names.get(code,'Без региона')
+        if sum(value==display for value in self.names.values())>1: display+=f' [{code}]'
+        title.text = clean(display+' — '+{'circles':'Зоны скопления POI','points':'Точки POI'}[kind])
         stream.write(ET.tostring(title,encoding='unicode'))
         stream.write('<Style id="circle"><LineStyle><color>ff0088ff</color><width>2</width></LineStyle><PolyStyle><color>400088ff</color></PolyStyle></Style>'
                      '<Style id="poi"><IconStyle><color>ffff8800</color></IconStyle></Style>'
@@ -157,7 +160,10 @@ def load(source, db, config, names):
                      'points_exported','points_in_selected_circles','duplicate_centers_removed',
                      'unnamed_excluded','unassigned_excluded','excluded_type','excluded_region',
                      'non_telecom_excluded','chain_excluded']})
-    reverse = {name:code for code,name in names.items() if code}
+    reverse = {}
+    for code,name in names.items():
+        if code:
+            reverse[name] = None if name in reverse else code
     db.execute('CREATE TABLE keys(kind TEXT,id TEXT,PRIMARY KEY(kind,id)) WITHOUT ROWID')
     db.execute('CREATE TABLE points(seq INTEGER PRIMARY KEY,lon REAL,lat REAL,region TEXT,name TEXT,payload TEXT)')
     with source.open(encoding='utf-8-sig',newline='') as stream:
@@ -175,6 +181,8 @@ def load(source, db, config, names):
             lon,lat = float(row['lon']),float(row['lat'])
             if not (math.isfinite(lon) and math.isfinite(lat) and -180<=lon<=180 and -90<=lat<=90):
                 raise ValueError('Invalid source coordinates')
+            if 'region_code' not in row and row['region_name'] and reverse.get(row['region_name'],'') is None:
+                raise ValueError('Ambiguous region label; generate KML from the full source with ISO region_code')
             code = (row['region_code'] or '') if 'region_code' in row else (reverse.get(row['region_name'],'') if row['region_name'] else '')
             if row['region_name'] and (not code or code not in names): raise ValueError('Unknown source region')
             if code and names[code]!=row['region_name']: raise ValueError('Region label differs from index')
