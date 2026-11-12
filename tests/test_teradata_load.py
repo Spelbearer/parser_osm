@@ -97,7 +97,7 @@ def test_conversion_matches_target_ddl():
     assert values['REGION_NAME_EDW'] == 'Москва'
 
 
-@pytest.mark.parametrize('changes', [dict(point_name='я'*101), dict(point_name='😀'*51),
+@pytest.mark.parametrize('changes', [dict(point_name='я'*256), dict(point_name='😀'*128),
     dict(osm_id='9223372036854775808'), dict(osm_type='relation'), dict(lat='NaN'),
     dict(lon='181'), dict(is_chain='yes'), dict(update_date='2026-02-30')])
 def test_invalid_values_are_rejected(changes):
@@ -158,7 +158,7 @@ def test_check_only_and_invalid_source_never_connect(tmp_path):
 
     report = execute(tmp_path, check_only=True, connect=forbidden)
     assert report['status'] == 'TERADATA_CHECK_SUCCESS' and report['rows'] == 1
-    save(source, [row(point_name='x'*101)])
+    save(source, [row(point_name='x'*256)])
     with pytest.raises(ValueError, match='POINT_NAME'):
         execute(tmp_path, connect=forbidden)
     assert source.exists()
@@ -200,3 +200,11 @@ def test_execute_load_reports_success_and_keeps_source(tmp_path):
     assert report['status'] == 'TERADATA_LOAD_SUCCESS' and con.committed == 1
     assert source.read_bytes() == saved
     assert json.loads((result/'analysis/teradata_load.json').read_text()) == report
+
+
+def test_point_name_255_is_preserved_and_other_limits_stay_100():
+    name = 'я' * 255
+    values = dict(zip(COLUMNS, convert(row(point_name=name, chain_name='с' * 100))))
+    assert values['POINT_NAME'] == name
+    with pytest.raises(ValueError, match=r'VARCHAR\(100\) exceeded: CHAIN_NAME'):
+        convert(row(chain_name='с' * 101))

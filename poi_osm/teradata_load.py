@@ -53,8 +53,9 @@ def convert(row):
     values['IS_TELECOM'] = int(values['IS_TELECOM']) if values['IS_TELECOM'] is not None else None
     values['UPDATE_DATE'] = date.fromisoformat(values['UPDATE_DATE']) if values['UPDATE_DATE'] else None
     for column, value in values.items():
-        if isinstance(value, str) and len(value.encode('utf-16-le')) // 2 > 100:
-            raise ValueError('VARCHAR(100) exceeded: ' + column)
+        limit = 255 if column == 'POINT_NAME' else 100
+        if isinstance(value, str) and len(value.encode('utf-16-le')) // 2 > limit:
+            raise ValueError(f'VARCHAR({limit}) exceeded: {column}')
     return tuple(values[c] for c in COLUMNS)
 
 
