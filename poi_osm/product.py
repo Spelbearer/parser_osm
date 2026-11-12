@@ -15,7 +15,7 @@ import sys
 import time
 import uuid
 import zipfile
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,6 +25,12 @@ from .classification import CONFIG
 from .collection import inspect_sources, profile_from
 from .config import load_settings
 from .geography import RegionIndex
+from .installation import (
+    local_settings,
+    portable_product,
+    product_config,
+    proxy_environment,
+)
 from .kml import RENDERER_VERSION as KML_RENDERER_VERSION
 from .kml import build as build_kml
 from .kml import validate as validate_kml
@@ -248,7 +254,9 @@ def configure_product(root, settings_path, profile_path, boundary, input_folder)
             'collection_profile':'config/collection.json','export_profile':'config/teradata_export.json',
             'kml_config':'config/kml.json','region_dictionary':str(CONFIG/'region_dictionary.json'),'keep_results':1,'logs_to_keep':10}
     atomic_json(root/'product.json',config)
-    return config
+    portable=portable_product(root)
+    portable['_cleanup_project']=settings['root']
+    return portable
 
 
 def initialise(root, source, settings_path=None, profile_path=None):
@@ -322,7 +330,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
             candidate=read(reuse)
             dictionary_matches=(not region_mapping['applicable_regions'] or (candidate.get('region_mapping') or {}).get('dictionary_sha256')==region_mapping['dictionary_sha256'])
             if candidate.get('renderer_version')==KML_RENDERER_VERSION and dictionary_matches and candidate.get('source_csv_sha256')==_hash_file(source/'poi_teradata.csv') and candidate.get('config')==kml_config and candidate.get('status')=='KML_EXPORT_SUCCESS':
-                archive=Path(candidate['archive'])
+                archive=(root/'result/poi_layers.zip') if Path(reuse).parent==root/'result/analysis' else Path(candidate['archive'])
                 if archive.is_file():
                     with zipfile.ZipFile(archive) as existing:
                         archived=json.loads(existing.read('summary.json'))
@@ -377,7 +385,9 @@ def render_in_child(registry, manifest, root, work, config, run_id, review, reus
 def run_collection(root, work, config, input_folder=None):
     transient=work/'collection';(transient/'state').mkdir(parents=True)
     previous=root/'result/.state/last_success.json'
-    if previous.exists(): atomic_json(transient/'state/last_success.json',read(previous))
+    if previous.exists():
+        prior=read(previous);prior.update(registry=str(root/'result/.state/registry.sqlite'),output=str(root/'result'))
+        atomic_json(transient/'state/last_success.json',prior)
     args=[sys.executable,'-m','poi_osm.collection',str(input_folder or config['input_folder']),'--output',str(transient),
           '--config',str(root/config['settings']),'--profile',str(root/config['collection_profile']),'--production','--registry-only']
     LOG.info('Extracting the current PBF snapshot; temporary caches will be removed after completion')
@@ -463,7 +473,8 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
         recover_swap(root)
         if action!='adopt' and (root/'state').exists():
             legacy_locks.enter_context(process_lock(root/'state/process.lock'))
-        logs_limit=validate_product(root,read(root/'product.json'),local_inputs=action!='download') if (root/'product.json').exists() else 10
+        if (root/'product.json').exists(): portable_product(root)
+        logs_limit=validate_product(root,product_config(root),local_inputs=action not in {'download','files','portable'} and input_folder is None) if (root/'product.json').exists() else 10
         old_work=root/'.work'
         if old_work.exists():
             for item in old_work.iterdir():
@@ -475,6 +486,9 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
         atomic_json(work/'owner.json',{'root':str(root),'child_pid':None})
         report=None
         try:
+            if action=='portable':
+                if not (root/'product.json').is_file(): raise ValueError('An existing product installation is required')
+                return {'status':'PRODUCT_PORTABLE','root':str(root),'version':__version__}
             if action=='init':
                 if (root/'product.json').exists(): raise ValueError('Already initialized; run without --init')
                 if input_folder is None or boundary is None: raise ValueError('--init requires --input and --boundaries')
@@ -483,7 +497,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 # Read-only source verification runs before configuration is saved.
                 inspect_sources(Path(input_folder),profile_from(Path(profile_path)))
                 config=configure_product(root,settings_path,profile_path,boundary,input_folder)
-                logs_limit=validate_product(root,config,local_inputs=action!='download')
+                logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable'})
                 LOG.info('Configuration initialized; run the same command without --init to process PBF')
                 return {'status':'PRODUCT_INITIALIZED','version':__version__,'root':str(root),'input_folder':config['input_folder']}
             if action=='adopt':
@@ -496,7 +510,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                     raise ValueError('A reviewed successful production run is required for migration')
                 if (root/'product.json').exists():
                     if (root/'result').exists(): raise ValueError('Already migrated; use --files or a normal run')
-                    config=read(root/'product.json')
+                    config=product_config(root)
                 else: config=initialise(root,source,settings_path,profile_path)
                 manifest=read(source/'summary.json');registry=Path(legacy['registry'])
                 if manifest.get('status')!='SUCCESS' or not manifest.get('boundaries_reviewed') or manifest.get('registry')!=legacy['registry']:
@@ -504,13 +518,15 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 review=source/'review.csv';reuse=root/'kml/last_success.json'
             else:
                 if not (root/'product.json').exists(): raise ValueError('First use --adopt with the existing reviewed production result')
-                config=read(root/'product.json')
-                logs_limit=validate_product(root,config,local_inputs=action!='download')
+                config=product_config(root)
+                if input_folder is not None: config['input_folder']=str(Path(input_folder).resolve())
+                logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable'})
                 check_publish_access(root,work,run_id)
                 if action=='files':
                     if not (root/'result/.state/last_success.json').exists():
                         raise ValueError('No saved registry yet; run without --files first')
-                    manifest=read(root/'result/.state/last_success.json');registry=Path(manifest['registry'])
+                    manifest=read(root/'result/.state/last_success.json');registry=root/'result/.state/registry.sqlite'
+                    manifest.update(registry=str(registry),output=str(root/'result'))
                     review=root/'result/analysis/review.csv';reuse=root/'result/analysis/kml_summary.json'
                 else:
                     if action=='download':
@@ -522,13 +538,13 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                         manifest=run_collection(root,work,config)
                     registry=Path(manifest['registry'])
                     review=Path(manifest['output'])/'review.csv';reuse=None
-            logs_limit=validate_product(root,config,local_inputs=action!='download')
+            logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable'})
             bundle,report=render_in_child(registry,manifest,root,work,config,run_id,review,reuse)
             publish(bundle,root,work,run_id)
             legacy_locks.close()
             cleanup=cleanup_legacy(root,manifest)
             if action!='adopt': cleanup['removed'].extend(['working files','unpacked KML','previous result'])
-            project_cleanup=cleanup_project(load_settings(root/config['settings'])['root'],manifest)
+            project_cleanup=cleanup_project(config.get('_cleanup_project',REPO),manifest)
             cleanup['removed'].extend(project_cleanup['removed'])
             cleanup['skipped'].extend(project_cleanup['skipped'])
             atomic_json(root/'result/analysis/cleanup.json',cleanup)
@@ -560,8 +576,10 @@ def main(argv=None):
     configure_utf8()
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version',action='version',version=f'%(prog)s {__version__}')
-    parser.add_argument('--root',required=True,type=Path,help='Output root, e.g. D:\\osm_results')
+    parser.add_argument('--local-config',type=Path,help='Local machine configuration; defaults to local.json when --root is omitted')
+    parser.add_argument('--root',type=Path,help='Output root, e.g. D:\\osm_results')
     group=parser.add_mutually_exclusive_group()
+    group.add_argument('--make-portable',action='store_true',help='Copy rule dictionaries into the existing installation and store relative paths')
     group.add_argument('--init',action='store_true',help='Initialize a new installation using previously reviewed boundaries')
     group.add_argument('--adopt',action='store_true',help='Migrate a reviewed successful legacy result and remove recognised legacy artifacts')
     group.add_argument('--load-teradata',action='store_true',help='Replace the Teradata table with the last verified POI snapshot')
@@ -574,6 +592,18 @@ def main(argv=None):
     parser.add_argument('--settings',type=Path,help='Settings template for initialization or legacy migration')
     parser.add_argument('--profile',type=Path,help='Collection profile for initialization or legacy migration')
     args=parser.parse_args(argv)
+    machine=None
+    if args.root is not None and args.local_config is not None:
+        parser.error('Use either --root or --local-config')
+    if args.root is None:
+        machine=local_settings(args.local_config or REPO/'local.json')
+        args.root=machine['root']
+        explicit=any((args.init,args.adopt,args.make_portable,args.load_teradata,args.check_teradata,args.download,args.files))
+        if not explicit:
+            args.files=machine['source_mode']=='files'
+            args.download=machine['source_mode']=='download'
+        if args.download and machine['proxy'].get('enabled') and machine['proxy'].get('windows_negotiate'):
+            args.windows_proxy=True
     if args.windows_proxy and not args.download:
         parser.error('--windows-proxy is only valid with --download')
     if args.load_teradata or args.check_teradata:
@@ -586,8 +616,10 @@ def main(argv=None):
     if not args.init and (args.input is not None or args.boundaries is not None):
         parser.error('--input and --boundaries are only valid with --init; edit product.json for an existing installation')
     if args.init and (args.input is None or args.boundaries is None): parser.error('--init requires --input and --boundaries')
-    report=execute(args.root,'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input,boundary=args.boundaries,windows_proxy=args.windows_proxy)
-    if report['status']=='PRODUCT_INITIALIZED':
+    local_input=machine['input'] if machine and not any((args.init,args.adopt,args.files,args.download,args.make_portable)) else None
+    with proxy_environment(machine['proxy']) if machine else nullcontext():
+        report=execute(args.root,'portable' if args.make_portable else 'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input or local_input,boundary=args.boundaries,windows_proxy=args.windows_proxy)
+    if report['status'] in {'PRODUCT_INITIALIZED','PRODUCT_PORTABLE'}:
         print(json.dumps(report,ensure_ascii=False,indent=2));return 0
     brief={key:report[key] for key in ['status','output','archive','total_objects','unassigned_objects','cleanup_complete']}
     brief['kml_points']=report['kml_counts']['points_exported']

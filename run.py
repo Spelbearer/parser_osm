@@ -1,4 +1,4 @@
-"""Основной скрипт POI: python run.py --root D:\\osm_results [--adopt | --files]."""
+"""Основной скрипт POI: python run.py (local.json) или --root <папка>."""
 import logging
 
 from poi_osm.product import main

@@ -1,0 +1,11 @@
+{
+  "base_dir": ".",
+  "product_folder": "result",
+  "input_folder": "pbf",
+  "source_mode": "files",
+  "proxy": {
+    "enabled": false,
+    "url": "http://t2rs-fgproxy.corp.tele2.ru:8080",
+    "windows_negotiate": false
+  }
+}

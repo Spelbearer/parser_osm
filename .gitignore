@@ -15,3 +15,6 @@ russia_output/
 .work/
 .product.lock
 .swap.json
+
+# Machine-specific base path, source mode and proxy settings.
+/local.json
