@@ -25,6 +25,7 @@ from .collection import inspect_sources, profile_from
 from .config import load_settings
 from .geography import RegionIndex
 from .kml import build as build_kml
+from .kml import validate as validate_kml
 from .objects import export_objects
 from .region_dictionary import RegionDictionary
 from .region_files import split_regions
@@ -281,7 +282,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     if review and Path(review).is_file(): shutil.copyfile(review,bundle/'analysis/review.csv')
     checks['run']=str(root/'result/.state/registry.sqlite');atomic_json(bundle/'analysis/audit.json',checks)
     final_registry=root/'result/.state/registry.sqlite'
-    kml_config=read(root/config['kml_config']); kml_report=None; archive=None
+    kml_config=validate_kml(read(root/config['kml_config'])); kml_report=None; archive=None
     if reuse and Path(reuse).is_file():
         try:
             candidate=read(reuse)

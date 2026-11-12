@@ -14,7 +14,7 @@ from poi_osm.kml import NS, build, circle, neighbors, validate
 from poi_osm.teradata_export import export
 
 GEOD = Geod(ellps='WGS84')
-BASE = {'radius_m':60,'min_count':5,'count_mode':'distinct_names','points_scope':'all_named',
+BASE = {'circle_mode':'per_point','radius_m':60,'min_count':5,'count_mode':'distinct_names','points_scope':'all_named',
         'circle_vertices':72,'max_features_per_file':10000,'osm_types':['node','way'],
         'include_unassigned':False,'telecom_only':False,'exclude_chains':False,'regions':None}
 
@@ -186,3 +186,88 @@ def test_reduced_csv_with_ambiguous_region_names_is_not_guessed(tmp_path):
         build(root,tmp_path/'out',config(tmp_path))
     assert not (tmp_path/'out/last_success.json').exists()
     assert not (tmp_path/'out/work').exists()
+
+
+def zone_source(tmp_path, coordinates, *, repeated=False):
+    root=source(tmp_path)
+    with (root/'poi_teradata.csv').open(encoding='utf-8-sig', newline='') as stream:
+        template=next(csv.DictReader(stream, delimiter=';'))
+    records=[{**template, 'osm_type':'node', 'osm_id':str(i+1),
+              'point_name':'Одинаковое имя' if repeated else f'Магазин {i}',
+              'lon':str(lon), 'lat':str(lat), 'is_telecom':'1' if i<2 else '0',
+              'is_chain':'1' if i==2 else '0'} for i,(lon,lat) in enumerate(coordinates)]
+    with (root/'poi_teradata.csv').open('w',encoding='utf-8-sig',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=list(template),delimiter=';');writer.writeheader();writer.writerows(records)
+    (root/'summary.json').write_text(json.dumps({'status':'SUCCESS','object_export':{'teradata_objects':len(records)}}))
+    return root
+
+
+def zone_data(node):
+    return {item.attrib['name']:item.find('{'+NS+'}value').text for item in node.findall('.//{'+NS+'}Data')}
+
+
+def test_visit_zone_replaces_five_circles_and_reports_business_counts(tmp_path):
+    root=source(tmp_path)
+    report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones'))
+    assert report['counts']['circles']==1
+    assert report['counts']['points_exported']==6
+    assert report['counts']['points_in_selected_circles']==5
+    data=zone_data(kml_nodes(report,'circles')[0])
+    assert data['poi_count']==data['distinct_names']=='5'
+    assert data['telecom_count']==data['chain_count']=='1'
+    assert float(data['center_lon'])!=37
+    assert 'center_osm_id' not in data
+
+
+def test_zone_center_between_points_finds_group_missed_by_poi_centers(tmp_path):
+    coordinates=[GEOD.fwd(37,55,bearing,55)[:2] for bearing in np.linspace(0,360,5,endpoint=False)]
+    root=zone_source(tmp_path,coordinates)
+    old=build(root,tmp_path/'old',config(tmp_path,circle_mode='per_point'))
+    assert old['counts']['circles']==0
+    report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones'))
+    assert report['counts']['circles']==1
+    data=zone_data(kml_nodes(report,'circles')[0])
+    assert data['poi_count']=='5' and data['telecom_count']=='2' and data['chain_count']=='1'
+    for lon,lat in coordinates:
+        assert GEOD.inv(float(data['center_lon']),float(data['center_lat']),lon,lat)[2]<60
+
+
+def test_long_street_is_split_into_compact_zones_without_losing_point_layer(tmp_path):
+    coordinates=[GEOD.fwd(37,55,90,i*20)[:2] for i in range(20)]
+    root=zone_source(tmp_path,coordinates)
+    report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones'))
+    zones=kml_nodes(report,'circles')
+    assert 1<len(zones)<20 and report['counts']['points_exported']==20
+    assert report['counts']['near_duplicate_zones_removed']>0
+    memberships=[]
+    for node in zones:
+        data=zone_data(node)
+        ids={i for i,(lon,lat) in enumerate(coordinates) if GEOD.inv(float(data['center_lon']),float(data['center_lat']),lon,lat)[2]<60}
+        assert len(ids)==int(data['poi_count']) and 5<=len(ids)<=7
+        assert all(len(ids & old)/min(len(ids),len(old))<0.8 for old in memberships)
+        memberships.append(ids)
+
+
+def test_zones_at_dateline_and_repeated_name_threshold(tmp_path):
+    coordinates=[GEOD.fwd(179.9999,65,bearing,55)[:2] for bearing in np.linspace(0,360,5,endpoint=False)]
+    root=zone_source(tmp_path,coordinates,repeated=True)
+    report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones'))
+    assert report['counts']['circles']==0
+    report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones',count_mode='objects'))
+    assert report['counts']['circles']==1
+    assert kml_nodes(report,'circles')[0].find('{'+NS+'}MultiGeometry') is not None
+
+
+def test_existing_config_without_zone_options_defaults_to_visit_zones(tmp_path):
+    root=source(tmp_path)
+    path=config(tmp_path)
+    settings=json.loads(path.read_text());settings.pop('circle_mode');path.write_text(json.dumps(settings))
+    report=build(root,tmp_path/'out',path)
+    assert report['config']['circle_mode']=='visit_zones' and report['counts']['circles']==1
+    assert report['config']['zone_overlap_threshold']==0.8
+
+
+@pytest.mark.parametrize('field,value',[('circle_mode','bad'),('zone_overlap_threshold',0),
+                                       ('zone_overlap_threshold',True),('zone_overlap_threshold',1.1)])
+def test_invalid_zone_options(field,value):
+    with pytest.raises(ValueError): validate({**BASE,field:value})

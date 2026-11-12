@@ -25,6 +25,7 @@ from .classification import CONFIG
 from .geography import split_dateline
 from .runtime import atomic_json, configure_utf8
 from .sources import _hash_file
+from .visit_zones import select_zones
 
 LOG = logging.getLogger(__name__)
 NS = 'http://www.opengis.net/kml/2.2'
@@ -35,7 +36,8 @@ LABELS = {'point_name':'Название','osm_type':'Тип OSM','osm_id':'ID O
           'primary_osm_key':'Ключ OSM','primary_osm_value':'Тег OSM','is_telecom':'Телефония',
           'telecom_type':'Тип телефонии','is_chain':'Крупная сеть','chain_name':'Название сети',
           'center_osm_type':'Тип OSM центра','center_osm_id':'ID OSM центра','radius_m':'Радиус, м',
-          'distinct_names':'Разных названий','poi_count':'Объектов POI','count_mode':'Способ подсчёта'}
+          'zone_id':'Зона посещения','center_lon':'Долгота центра','center_lat':'Широта центра',
+          'telecom_count':'Точек телефонии','chain_count':'Точек крупных сетей','distinct_names':'Разных названий','poi_count':'Объектов POI','count_mode':'Способ подсчёта'}
 
 
 def clean(value):
@@ -49,6 +51,14 @@ def element(parent, tag, value=None, **attrs):
 
 
 def validate(config):
+    config = {**config}
+    config.setdefault('circle_mode', 'visit_zones')
+    config.setdefault('zone_overlap_threshold', 0.8)
+    if config['circle_mode'] not in {'visit_zones', 'per_point'}:
+        raise ValueError('circle_mode must be visit_zones or per_point')
+    overlap = config['zone_overlap_threshold']
+    if isinstance(overlap, bool) or not isinstance(overlap, (int, float)) or not math.isfinite(overlap) or not 0 < overlap <= 1:
+        raise ValueError('zone_overlap_threshold must be in (0, 1]')
     radius = config.get('radius_m')
     if isinstance(radius,bool) or not isinstance(radius,(int,float)) or not math.isfinite(radius) or not 0 < radius <= 10000:
         raise ValueError('radius_m must be in (0, 10000] metres')
@@ -157,7 +167,7 @@ class Layers:
 
 def load(source, db, config, names):
     stats = Counter({key:0 for key in ['source_rows','eligible_points','candidate_centers','circles',
-                     'points_exported','points_in_selected_circles','duplicate_centers_removed',
+                     'points_exported','points_in_selected_circles','duplicate_centers_removed','zone_candidates','near_duplicate_zones_removed',
                      'unnamed_excluded','unassigned_excluded','excluded_type','excluded_region',
                      'non_telecom_excluded','chain_excluded']})
     reverse = {}
@@ -239,27 +249,40 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
         count = stats['eligible_points']
         lons,lats = np.empty(count),np.empty(count)
         name_ids = np.empty(count,dtype=np.int32); dictionary = {}
-        for seq,lon,lat,name in db.execute('SELECT seq,lon,lat,name FROM points ORDER BY seq'):
+        telecom,chains = np.zeros(count,dtype=bool),np.zeros(count,dtype=bool)
+        for seq,lon,lat,name,payload in db.execute('SELECT seq,lon,lat,name,payload FROM points ORDER BY seq'):
             lons[seq],lats[seq] = lon,lat
             name_ids[seq] = dictionary.setdefault(name,len(dictionary))
+            attributes = json.loads(payload)
+            telecom[seq],chains[seq] = attributes.get('is_telecom')=='1',attributes.get('is_chain')=='1'
         tree = STRtree(points(lons,lats)) if count else None
         included = np.zeros(count,dtype=bool)
-        for seq,code,lon,lat in db.execute('SELECT MIN(seq),region,lon,lat FROM points GROUP BY region,lon,lat ORDER BY MIN(seq)'):
-            ids = neighbors(tree,lon,lat,lons,lats,config['radius_m'])
-            distinct = len(np.unique(name_ids[ids]))
-            metric = distinct if config['count_mode']=='distinct_names' else len(ids)
-            stats['candidate_centers'] += 1
-            if metric >= config['min_count']:
+        if config['circle_mode']=='visit_zones':
+            for zone in select_zones(db,tree,lons,lats,name_ids,telecom,chains,config,neighbors,GEOD,stats):
+                ids = zone.pop('members');representative = zone.pop('representative')
+                code = db.execute('SELECT region FROM points WHERE seq=?',(representative,)).fetchone()[0]
                 included[ids] = True
-                center = json.loads(db.execute('SELECT payload FROM points WHERE seq=?',(seq,)).fetchone()[0])
-                data = {'center_osm_type':center['osm_type'],'center_osm_id':center['osm_id'],
-                        'radius_m':config['radius_m'],'distinct_names':distinct,'poi_count':len(ids),
-                        'count_mode':config['count_mode'],'region_name':names[code]}
-                feature = placemark(f"{center['point_name']} — {distinct} названий, {len(ids)} POI",data,
-                                    circle(lon,lat,config['radius_m'],config['circle_vertices']),'circle')
-                layers.write('circles',code,feature);stats['circles'] += 1
-            if stats['candidate_centers'] % 5000==0: LOG.info('Checked %s circle centers; selected %s',stats['candidate_centers'],stats['circles'])
-        stats['duplicate_centers_removed'] = count-stats['candidate_centers']
+                data = {**zone,'count_mode':config['count_mode'],'region_name':names[code]}
+                title = f"Зона — {zone['poi_count']} POI, {zone['distinct_names']} названий, телефония: {zone['telecom_count']}, сети: {zone['chain_count']}"
+                layers.write('circles',code,placemark(title,data,circle(zone['center_lon'],zone['center_lat'],config['radius_m'],config['circle_vertices']),'circle'))
+                stats['circles'] += 1
+        else:
+            for seq,code,lon,lat in db.execute('SELECT MIN(seq),region,lon,lat FROM points GROUP BY region,lon,lat ORDER BY MIN(seq)'):
+                ids = neighbors(tree,lon,lat,lons,lats,config['radius_m'])
+                distinct = len(np.unique(name_ids[ids]))
+                metric = distinct if config['count_mode']=='distinct_names' else len(ids)
+                stats['candidate_centers'] += 1
+                if metric >= config['min_count']:
+                    included[ids] = True
+                    center = json.loads(db.execute('SELECT payload FROM points WHERE seq=?',(seq,)).fetchone()[0])
+                    data = {'center_osm_type':center['osm_type'],'center_osm_id':center['osm_id'],
+                            'radius_m':config['radius_m'],'distinct_names':distinct,'poi_count':len(ids),
+                            'count_mode':config['count_mode'],'region_name':names[code]}
+                    feature = placemark(f"{center['point_name']} — {distinct} названий, {len(ids)} POI",data,
+                                        circle(lon,lat,config['radius_m'],config['circle_vertices']),'circle')
+                    layers.write('circles',code,feature);stats['circles'] += 1
+                if stats['candidate_centers'] % 5000==0: LOG.info('Checked %s circle centers; selected %s',stats['candidate_centers'],stats['circles'])
+            stats['duplicate_centers_removed'] = count-stats['candidate_centers']
         stats['points_in_selected_circles'] = int(included.sum())
         for seq,code,payload in db.execute('SELECT seq,region,payload FROM points ORDER BY seq'):
             if config['points_scope']=='selected_circles' and not included[seq]: continue
@@ -285,7 +308,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
                   'config':config,'counts':dict(stats),'files':layers.files,'file_checks_ok':True,
                   'layers_kept':bool(keep_unpacked),'layer_paths':'ZIP entries',
                   'license':'ODbL-1.0; © OpenStreetMap contributors',
-                  'semantics':'WGS84 distances; named eligible objects; center included; strict radius; circles may overlap or cross regional borders; membership is not clipped by region.'}
+                  'semantics':'WGS84 strict radius; named eligible objects; visit_zones use local group centers and greedy member-overlap suppression; per_point uses POI centers; zones can overlap and cross regional borders; membership is not clipped by region.'}
         atomic_json(stage/'summary.json',report)
         with (stage/'regions_index.csv').open('w',encoding='utf-8-sig',newline='') as stream:
             writer = csv.DictWriter(stream,fieldnames=['kind','region_code','region_name','file','features'],delimiter=';')

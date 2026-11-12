@@ -5,9 +5,14 @@
   "points_scope": "all_named",
   "circle_vertices": 72,
   "max_features_per_file": 10000,
-  "osm_types": ["node", "way"],
+  "osm_types": [
+    "node",
+    "way"
+  ],
   "include_unassigned": false,
   "telecom_only": false,
   "exclude_chains": false,
-  "regions": null
+  "regions": null,
+  "circle_mode": "visit_zones",
+  "zone_overlap_threshold": 0.8
 }
