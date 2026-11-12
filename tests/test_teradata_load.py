@@ -212,15 +212,16 @@ def test_point_name_255_is_preserved_and_other_limits_stay_100():
         convert(row(chain_name='с' * 101))
 
 
-def test_extended_unicode_is_preserved_and_audited(tmp_path):
-    from poi_osm.teradata_load import audit_unicode
+def test_extended_unicode_is_cleaned_only_in_upload_and_audited(tmp_path):
+    from poi_osm.teradata_load import prepare_snapshot
     name = 'Ремонт телефонов 📱'
     source = tmp_path/'poi.csv'; save(source, [row(point_name=name), row(osm_id='124')])
     original = source.read_bytes()
     output = tmp_path/'unicode.csv'
-    report = audit_unicode(source, output)
-    assert report['rows_with_extended_unicode'] == 1
-    assert report['extended_characters'] == 1
+    prepared = tmp_path/'prepared.csv'
+    report = prepare_snapshot(source, prepared, output)
+    assert report['changed_objects'] == 1
+    assert report['replaced_characters'] == 1
     with output.open(encoding='utf-8-sig', newline='') as stream:
         entries = list(csv.DictReader(stream, delimiter=';'))
     assert entries[0]['osm_type_id'] == 'way/123' and entries[0]['column'] == 'POINT_NAME'
@@ -232,10 +233,10 @@ def test_extended_unicode_is_preserved_and_audited(tmp_path):
         options.update(kwargs)
         return con
 
-    replace_snapshot(source, 2, connect=connect, password='p@ss')
+    replace_snapshot(prepared, 2, connect=connect, password='p@ss')
     assert options['charset'] == 'UTF8'
     assert con.statements[0] == 'SET SESSION CHARACTER SET UNICODE PASS THROUGH ON'
-    assert con.pending[0][COLUMNS.index('POINT_NAME')] == name
+    assert con.pending[0][COLUMNS.index('POINT_NAME')] == 'Ремонт телефонов'
     assert source.read_bytes() == original
 
 
@@ -278,3 +279,49 @@ def test_batch_diagnostics_are_read_before_rollback_and_masked(tmp_path):
 def test_invalid_unicode_rejected_before_database(name):
     with pytest.raises(ValueError, match='Invalid Unicode scalar or NUL: POINT_NAME'):
         convert(row(point_name=name))
+
+
+@pytest.mark.parametrize('name,subcategory,expected,action', [
+    ('📱📞', 'Ремонт телефонов', 'Ремонт телефонов', 'primary_subcategory_fallback'),
+    ('👨\u200d💻\ufe0f', 'Компьютеры', 'Компьютеры', 'primary_subcategory_fallback'),
+    ('📱', '', '', 'null_missing_subcategory'),
+    ('Теле📱фон', 'Ремонт', 'Теле фон', 'replace_with_space'),
+    ('📱', 'Компьютеры 💻', 'Компьютеры', 'primary_subcategory_fallback'),
+])
+def test_cleaning_and_subcategory_fallback(tmp_path, name, subcategory, expected, action):
+    from poi_osm.teradata_load import prepare_snapshot
+    source=tmp_path/'source.csv'; save(source, [row(point_name=name, primary_subcategory=subcategory)])
+    prepared=tmp_path/'prepared.csv'; audit=tmp_path/'unicode.csv'
+    stats=prepare_snapshot(source, prepared, audit)
+    with prepared.open(encoding='utf-8-sig', newline='') as stream:
+        loaded=list(csv.DictReader(stream, delimiter=';'))
+    assert loaded[0]['point_name']==expected
+    with audit.open(encoding='utf-8-sig', newline='') as stream:
+        changes=list(csv.DictReader(stream, delimiter=';'))
+    assert next(change for change in changes if change['column']=='POINT_NAME')['action']==action
+    assert stats['changed_objects']==1
+    assert list(batches(prepared))[0][0][COLUMNS.index('POINT_NAME')]==(expected or None)
+
+
+def test_existing_empty_name_and_bmp_text_stay_unchanged(tmp_path):
+    from poi_osm.teradata_load import prepare_snapshot
+    source=tmp_path/'source.csv'; save(source, [row(point_name='', primary_subcategory='Ремонт'),
+                                             row(osm_id='124', point_name='Связь №1 — 東京')])
+    prepared=tmp_path/'prepared.csv'
+    stats=prepare_snapshot(source, prepared, tmp_path/'unicode.csv')
+    assert stats['changed_objects']==0 and stats['point_name_fallbacks']==0
+    assert source.read_bytes()==prepared.read_bytes()
+
+
+def test_execute_upload_uses_subcategory_for_emoji_only_name(tmp_path):
+    result=tmp_path/'result'; (result/'analysis').mkdir(parents=True)
+    source=result/'poi_teradata.csv'; save(source, [row(point_name='📱', primary_subcategory='Ремонт телефонов')])
+    saved=source.read_bytes()
+    (result/'analysis/summary.json').write_text(json.dumps({'status':'PRODUCT_SUCCESS', 'production_ready':True,
+                                                         'file_checks_ok':True, 'total_objects':1}))
+    con=Connection()
+    report=execute(tmp_path, connect=lambda **kw: con, password='p@ss')
+    assert con.pending[0][COLUMNS.index('POINT_NAME')]=='Ремонт телефонов'
+    assert report['unicode_audit']['point_name_fallbacks']==1
+    assert report['prepared_csv_sha256']!=report['source_sha256']
+    assert source.read_bytes()==saved

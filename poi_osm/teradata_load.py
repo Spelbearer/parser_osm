@@ -97,31 +97,61 @@ def validate(path, keys_path):
 
 
 
-def audit_unicode(path, output):
-    """List extended Unicode code points for diagnosis; keep source text intact."""
+TEXT_FIELDS = {'POINT_NAME', 'REGION_NAME', 'REGION_NAME_EDW', 'PRIMARY_CATEGORY',
+               'PRIMARY_SUBCATEGORY', 'PRIMARY_OSM_KEY', 'PRIMARY_OSM_VALUE', 'TELECOM_TYPE', 'CHAIN_NAME'}
+
+
+def unsupported(char):
+    code = ord(char)
+    return code > 0xFFFF or code == 0 or 0xD800 <= code <= 0xDFFF or 0xFDD0 <= code <= 0xFDEF or code in {0xFFFE, 0xFFFF}
+
+
+def prepare_snapshot(path, prepared, output):
+    """Normalize text only in the upload copy and report every changed field."""
     temporary = output.with_suffix('.csv.tmp')
-    rows = fields = characters = 0
+    counts = {'changed_objects': 0, 'changed_fields': 0, 'replaced_characters': 0,
+              'point_name_fallbacks': 0, 'missing_subcategory_fallbacks': 0}
     try:
-        with path.open(encoding='utf-8-sig', newline='') as source, temporary.open('w', encoding='utf-8-sig', newline='') as saved:
+        with path.open(encoding='utf-8-sig', newline='') as source, prepared.open('x', encoding='utf-8-sig', newline='') as cleaned, temporary.open('w', encoding='utf-8-sig', newline='') as audit:
             reader = csv.DictReader(source, delimiter=';')
-            writer = csv.writer(saved, delimiter=';')
-            writer.writerow(['object_row', 'osm_type_id', 'column', 'codepoints', 'characters'])
+            if not set(SOURCE.values()) <= set(reader.fieldnames or []):
+                raise ValueError('Missing POI export columns; regenerate using --files')
+            writer = csv.DictWriter(cleaned, fieldnames=reader.fieldnames, delimiter=';')
+            writer.writeheader()
+            report = csv.writer(audit, delimiter=';')
+            report.writerow(['object_row', 'osm_type_id', 'column', 'codepoints', 'characters', 'action', 'original', 'loaded'])
             for number, row in enumerate(reader, 1):
-                affected = False
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError(f'Malformed CSV row {number}')
+                changes = []
                 for column, name in SOURCE.items():
-                    extended = [char for char in row[name] if ord(char) > 0xFFFF]
-                    if extended:
-                        writer.writerow([number, row['osm_type'] + '/' + row['osm_id'], column,
-                                         ','.join(f'U+{ord(char):04X}' for char in sorted(set(extended))), len(extended)])
-                        affected = True
-                        fields += 1
-                        characters += len(extended)
-                rows += affected
+                    if column not in TEXT_FIELDS:
+                        continue
+                    original = row[name]
+                    invalid = [char for char in original if unsupported(char)]
+                    if not invalid:
+                        continue
+                    invalid = [char for char in original if unsupported(char) or char in '\u200d\ufe0e\ufe0f']
+                    row[name] = ''.join(' ' if unsupported(char) or char in '\u200d\ufe0e\ufe0f' else char for char in original).strip()
+                    changes.append((column, name, original, invalid))
+                for column, name, original, invalid in changes:
+                    action = 'replace_with_space'
+                    if column == 'POINT_NAME' and not row[name]:
+                        row[name] = row['primary_subcategory'].strip()
+                        action = 'primary_subcategory_fallback' if row[name] else 'null_missing_subcategory'
+                        counts['point_name_fallbacks'] += bool(row[name])
+                        counts['missing_subcategory_fallbacks'] += not bool(row[name])
+                    report.writerow([number, row['osm_type'] + '/' + row['osm_id'], column,
+                                     ','.join(f'U+{ord(char):04X}' for char in sorted(set(invalid))), len(invalid),
+                                     action, original, row[name]])
+                    counts['changed_fields'] += 1
+                    counts['replaced_characters'] += len(invalid)
+                counts['changed_objects'] += bool(changes)
+                writer.writerow(row)
         os.replace(temporary, output)
     finally:
         temporary.unlink(missing_ok=True)
-    return {'rows_with_extended_unicode': rows, 'fields_with_extended_unicode': fields,
-            'extended_characters': characters, 'report': str(output)}
+    return {**counts, 'policy': 'replace_unsupported_with_space_then_subcategory', 'report': str(output)}
 
 
 def password_for(user):
@@ -224,18 +254,23 @@ def execute(root, *, check_only=False, connect=None, password=None):
             snapshot = Path(temporary) / 'poi.csv'
             shutil.copyfile(source, snapshot)
             try:
-                total = validate(snapshot, Path(temporary) / 'keys.sqlite')
+                prepared = Path(temporary) / 'prepared.csv'
+                unicode_audit = prepare_snapshot(snapshot, prepared, analysis / 'teradata_unicode.csv')
+                total = validate(prepared, Path(temporary) / 'keys.sqlite')
                 if total != summary['total_objects']:
                     raise ValueError('CSV row count differs from product summary')
-                unicode_audit = audit_unicode(snapshot, analysis / 'teradata_unicode.csv')
-                LOG.info('Unicode audit: %d objects with supplementary characters; text preserved', unicode_audit['rows_with_extended_unicode'])
+                LOG.info('Unicode preparation: %d objects, %d fields changed; %d name fallbacks',
+                         unicode_audit['changed_objects'], unicode_audit['changed_fields'], unicode_audit['point_name_fallbacks'])
                 with snapshot.open('rb') as stream:
                     digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                with prepared.open('rb') as stream:
+                    prepared_digest = hashlib.file_digest(stream, 'sha256').hexdigest()
                 if not check_only:
-                    replace_snapshot(snapshot, total, connect=connect, password=password)
+                    replace_snapshot(prepared, total, connect=connect, password=password)
                 report = {'status': 'TERADATA_CHECK_SUCCESS' if check_only else 'TERADATA_LOAD_SUCCESS',
                           'table': TABLE, 'host': HOST, 'rows': total, 'source_sha256': digest,
                           'source_product_run_id': summary.get('product_run_id'), 'columns': COLUMNS,
+                          'prepared_csv_sha256': prepared_digest,
                           'session_charset': 'UTF8', 'unicode_pass_through_requested': True, 'unicode_pass_through_enabled': not check_only, 'unicode_audit': unicode_audit,
                           'batch_size': BATCH_SIZE, 'mode': 'full_snapshot_replace',
                           'timestamp': datetime.now(timezone.utc).isoformat()}
