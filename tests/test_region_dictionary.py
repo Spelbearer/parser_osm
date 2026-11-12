@@ -57,6 +57,8 @@ def test_output_mapping_preserves_keys_boundaries_and_update_state(collection):
     execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
     path=root/'config/region_dictionary.json';fixture_dictionary(path)
     config=json.loads((root/'product.json').read_text());config['region_dictionary']='config/region_dictionary.json';write_json(root/'product.json',config)
+    profile_path=root/config['export_profile']
+    profile=json.loads(profile_path.read_text());profile['fields'].remove('REGION_NAME_EDW');write_json(profile_path,profile)
     boundary=(root/'boundaries/regions.json').read_bytes()
     with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
         before=db.execute('SELECT osm_type,osm_id,region_name,fingerprint,first_seen_date FROM poi ORDER BY osm_type,osm_id,tag').fetchall()
@@ -64,13 +66,16 @@ def test_output_mapping_preserves_keys_boundaries_and_update_state(collection):
     assert report['region_mapping']['mapped_objects']==3
     assert report['region_mapping']['renamed_objects']==3
     rows=csv_rows(root/'result/poi_teradata.csv')
-    assert len(rows)==3 and len(rows[0])==17
+    assert len(rows)==3 and len(rows[0])==18
     assert {r['region_name'] for r in rows}=={'Один филиал'}
+    assert {r['REGION_NAME_EDW'] for r in rows}=={'Один филиал'}
+    assert {r['REGION_NAME_EDW'] for r in pq.read_table(root/'result/poi_teradata.parquet').to_pylist()}=={'Один филиал'}
     assert {r['region_name'] for r in pq.read_table(root/'result/poi_teradata.parquet').to_pylist()}=={'Один филиал'}
     index=csv_rows(root/'result/analysis/regions_index.csv')
     assert {r['region_code'] for r in index}=={'RU-AA','RU-BB'}
     assert {r['region_name'] for r in index}=={'Один филиал'}
     assert len({r['file'] for r in index})==len(index)
+    assert all(row['REGION_NAME_EDW']=='Один филиал' for entry in index for row in csv_rows(root/'result'/entry['file']))
     assert (root/'boundaries/regions.json').read_bytes()==boundary
     with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
         assert db.execute('SELECT osm_type,osm_id,region_name,fingerprint,first_seen_date FROM poi ORDER BY osm_type,osm_id,tag').fetchall()==before

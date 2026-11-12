@@ -212,7 +212,7 @@ def test_fresh_installation_initializes_and_runs_without_legacy_tools(collection
     assert finished.returncode==0,finished.stderr
     result=json.loads((root/'result/analysis/summary.json').read_text())
     assert result['total_objects']==3 and result['version']==__version__
-    assert len(result['columns'])==17
+    assert len(result['columns'])==18
     assert not list(root.rglob('full')) and not list(root.rglob('delta'))
     assert not (root/'.work').exists()
 

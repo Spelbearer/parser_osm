@@ -11,6 +11,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .classification import CONFIG
+from .region_dictionary import RegionDictionary
 from .region_files import split_regions
 from .runtime import atomic_json, configure_utf8
 from .selection import TERADATA_FIELDS
@@ -20,12 +21,13 @@ LOG = logging.getLogger(__name__)
 
 
 class Projection:
-    def __init__(self, profile):
+    def __init__(self, profile, region_dictionary=None):
+        self.region_dictionary = region_dictionary
         self.mode = profile.get('osm_id_format')
         self.fields = profile.get('fields')
         if self.mode not in {'typed', 'numeric_with_type'}:
             raise ValueError('osm_id_format must be typed or numeric_with_type')
-        if (not isinstance(self.fields, list) or not self.fields or any(f not in TERADATA_FIELDS for f in self.fields)
+        if (not isinstance(self.fields, list) or not self.fields or any(f not in [*TERADATA_FIELDS, 'REGION_NAME_EDW'] for f in self.fields)
                 or len(self.fields) != len(set(self.fields)) or 'osm_id' not in self.fields):
             raise ValueError('fields must be unique warehouse columns including osm_id')
         if self.mode == 'numeric_with_type' and 'osm_type' not in self.fields:
@@ -37,13 +39,17 @@ class Projection:
             raise ValueError('Invalid source OSM identity')
         if self.mode == 'numeric_with_type' and int(ident) > 9223372036854775807:
             raise ValueError('OSM ID exceeds signed BIGINT range')
-        result = {f:source[f] for f in self.fields}
+        result = {f:source[f] for f in self.fields if f != 'REGION_NAME_EDW'}
+        if 'REGION_NAME_EDW' in self.fields:
+            if self.region_dictionary is None:
+                raise ValueError('REGION_NAME_EDW requires a region dictionary')
+            result['REGION_NAME_EDW'] = self.region_dictionary.records.get(source['region_code'], {}).get('EDW', '')
         if self.mode == 'typed':
             result['osm_id'] = f'{kind}/{ident}'
         return result
 
 
-def export(run, output_root, profile_path):
+def export(run, output_root, profile_path, region_dictionary=None):
     import pyarrow as pa
     import pyarrow.parquet as pq
     run = Path(run).resolve()
@@ -51,11 +57,13 @@ def export(run, output_root, profile_path):
     if info.get('status') not in {'SUCCESS','COLLECTION_PREVIEW_SUCCESS'}:
         raise ValueError('Use a completed successful collection run')
     profile = json.loads(Path(profile_path).read_text(encoding='utf-8-sig'))
-    projection = Projection(profile)
+    projection = Projection(profile, region_dictionary)
     source = run/'poi_teradata.csv'
     source_hash = _hash_file(source)
     regions_file = run/('approved_regions.json' if (run/'approved_regions.json').exists() else 'candidate_regions.json')
     registry = json.loads(regions_file.read_text(encoding='utf-8'))
+    if 'REGION_NAME_EDW' in projection.fields and projection.region_dictionary is None:
+        projection.region_dictionary = RegionDictionary(CONFIG/'region_dictionary.json', registry)
     output = Path(output_root)/('teradata-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8])
     output.mkdir(parents=True,exist_ok=False)
     atomic_json(output/'profile.json',profile)

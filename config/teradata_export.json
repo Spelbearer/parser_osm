@@ -8,6 +8,7 @@
     "lat",
     "wkt",
     "region_name",
+    "REGION_NAME_EDW",
     "primary_category",
     "primary_subcategory",
     "primary_osm_key",

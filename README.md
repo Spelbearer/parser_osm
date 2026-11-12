@@ -50,7 +50,7 @@ D:\osm_results\
     boundaries\                      проверенные регионы и полигоны РФ
     logs\                            до 10 журналов; отчёт последней ошибки
     result\
-        poi_teradata.csv              17 колонок, одна строка на osm_type + osm_id
+        poi_teradata.csv              18 колонок, одна строка на osm_type + osm_id
         poi_teradata.parquet
         regions\                     CSV по регионам, части до 50 000 строк
         poi_layers.zip               KML внутри архива

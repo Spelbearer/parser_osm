@@ -267,7 +267,11 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     atomic_json(source/'approved_regions.json',display_regions)
     _,checks=audit(source,work/'checks')
     if not checks['file_checks_ok']: raise ValueError('Source audit failed')
-    warehouse,export=export_warehouse(source,work/'warehouse',root/config['export_profile'])
+    profile=read(root/config['export_profile'])
+    if 'REGION_NAME_EDW' not in profile['fields']:
+        profile['fields'].insert(profile['fields'].index('region_name')+1 if 'region_name' in profile['fields'] else len(profile['fields']), 'REGION_NAME_EDW')
+    atomic_json(work/'export_profile.json',profile)
+    warehouse,export=export_warehouse(source,work/'warehouse',work/'export_profile.json',region_dictionary=dictionary)
     bundle=work/'bundle';bundle.mkdir();(bundle/'analysis').mkdir();(bundle/'.state').mkdir()
     for name in ['poi_teradata.csv','poi_teradata.parquet','regions']:
         shutil.move(str(warehouse/name),str(bundle/name))

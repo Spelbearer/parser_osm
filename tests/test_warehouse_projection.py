@@ -54,3 +54,19 @@ def test_reduced_csv_parquet_and_regional_files_preserve_original(collection,tmp
     assert pq.read_table(output/'poi_teradata.parquet').schema.field('is_telecom').type.__str__()=='bool'
     parts = [r for entry in report['regional_export']['files'] for r in rows(output/entry['file'])]
     assert sorted(parts,key=lambda r:r['osm_id'])==sorted(data,key=lambda r:r['osm_id'])
+
+
+def test_edw_column_uses_dictionary_code_independently_of_display_name():
+    import json
+
+    from poi_osm.classification import CONFIG
+    from poi_osm.region_dictionary import RegionDictionary
+
+    dictionary = RegionDictionary(CONFIG/'region_dictionary.json', json.loads((CONFIG/'regions.json').read_text()))
+    mapper = Projection({'osm_id_format':'numeric_with_type',
+                         'fields':['osm_type','osm_id','region_name','REGION_NAME_EDW']}, dictionary)
+    source = {'osm_type':'node','osm_id':'1','region_code':'RU-TA','region_name':'Республика Татарстан'}
+    assert mapper.apply(source) == {'osm_type':'node','osm_id':'1','region_name':'Республика Татарстан',
+                                    'REGION_NAME_EDW':'Казань'}
+    source.update(region_code='', region_name='')
+    assert mapper.apply(source)['REGION_NAME_EDW'] == ''
