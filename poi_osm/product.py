@@ -25,6 +25,7 @@ from .classification import CONFIG
 from .collection import inspect_sources, profile_from
 from .config import load_settings
 from .geography import RegionIndex
+from .kml import RENDERER_VERSION as KML_RENDERER_VERSION
 from .kml import build as build_kml
 from .kml import validate as validate_kml
 from .objects import export_objects
@@ -320,13 +321,13 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
         try:
             candidate=read(reuse)
             dictionary_matches=(not region_mapping['applicable_regions'] or (candidate.get('region_mapping') or {}).get('dictionary_sha256')==region_mapping['dictionary_sha256'])
-            if dictionary_matches and candidate.get('source_csv_sha256')==_hash_file(source/'poi_teradata.csv') and candidate.get('config')==kml_config and candidate.get('status')=='KML_EXPORT_SUCCESS':
+            if candidate.get('renderer_version')==KML_RENDERER_VERSION and dictionary_matches and candidate.get('source_csv_sha256')==_hash_file(source/'poi_teradata.csv') and candidate.get('config')==kml_config and candidate.get('status')=='KML_EXPORT_SUCCESS':
                 archive=Path(candidate['archive'])
                 if archive.is_file():
                     with zipfile.ZipFile(archive) as existing:
                         archived=json.loads(existing.read('summary.json'))
                         archived_dictionary_matches=(not region_mapping['applicable_regions'] or (archived.get('region_mapping') or {}).get('dictionary_sha256')==region_mapping['dictionary_sha256'])
-                        if archived_dictionary_matches and existing.testzip() is None and archived.get('source_csv_sha256')==candidate['source_csv_sha256'] and archived.get('config')==kml_config:
+                        if archived.get('renderer_version')==KML_RENDERER_VERSION and archived_dictionary_matches and existing.testzip() is None and archived.get('source_csv_sha256')==candidate['source_csv_sha256'] and archived.get('config')==kml_config:
                             kml_report=archived
         except (OSError,ValueError,KeyError,RuntimeError,zipfile.BadZipFile):
             LOG.warning('Existing KML ZIP cannot be reused; rebuilding it from the registry')

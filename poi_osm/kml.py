@@ -31,6 +31,8 @@ LOG = logging.getLogger(__name__)
 NS = 'http://www.opengis.net/kml/2.2'
 ET.register_namespace('',NS)
 GEOD = Geod(ellps='WGS84')
+RENDERER_VERSION = 2
+POINT_ICON = 'http://maps.google.com/mapfiles/kml/paddle/ltblu-blank.png'
 LABELS = {'point_name':'Название','osm_type':'Тип OSM','osm_id':'ID OSM','address':'Адрес',
           'region_name':'Регион','region_code':'Код региона','primary_category':'Категория','primary_subcategory':'Подкатегория',
           'primary_osm_key':'Ключ OSM','primary_osm_value':'Тег OSM','is_telecom':'Телефония',
@@ -52,6 +54,7 @@ def element(parent, tag, value=None, **attrs):
 
 def validate(config):
     config = {**config}
+    config.setdefault('export_points', False)
     config.setdefault('circle_mode', 'visit_zones')
     config.setdefault('zone_overlap_threshold', 0.8)
     if config['circle_mode'] not in {'visit_zones', 'per_point'}:
@@ -70,7 +73,7 @@ def validate(config):
         raise ValueError('count_mode must be distinct_names or objects')
     if config.get('points_scope') not in {'all_named','selected_circles'}:
         raise ValueError('points_scope must be all_named or selected_circles')
-    for field in ['include_unassigned','telecom_only','exclude_chains']:
+    for field in ['include_unassigned','telecom_only','exclude_chains','export_points']:
         if not isinstance(config.get(field),bool): raise ValueError(f'{field} must be boolean')
     kinds = config.get('osm_types')
     if not isinstance(kinds,list) or not kinds or any(k not in {'node','way','relation'} for k in kinds) or len(kinds)!=len(set(kinds)):
@@ -145,8 +148,10 @@ class Layers:
         title.text = clean(display+' — '+{'circles':'Зоны скопления POI','points':'Точки POI'}[kind])
         stream.write(ET.tostring(title,encoding='unicode'))
         stream.write('<Style id="circle"><LineStyle><color>ff0088ff</color><width>2</width></LineStyle><PolyStyle><color>400088ff</color></PolyStyle></Style>'
-                     '<Style id="poi"><IconStyle><color>ffff8800</color></IconStyle></Style>'
-                     '<Style id="telecom"><IconStyle><color>ff00bb00</color></IconStyle></Style>')
+                     + ''.join(f'<Style id="{style_kind}"><IconStyle><color>ffffffff</color><scale>1</scale>'
+                               f'<Icon><href>{POINT_ICON}</href></Icon>'
+                               '<hotSpot x="0.5" y="0" xunits="fraction" yunits="fraction"/>'
+                               '</IconStyle></Style>' for style_kind in (('poi','telecom') if kind=='points' else ())))
         info = {'kind':kind,'region_code':code,'region_name':self.names.get(code,'Без региона'),
                 'file':path.relative_to(self.root).as_posix(),'features':0}
         self.files.append(info); self.open[kind,code] = (stream,info)
@@ -284,15 +289,16 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
                 if stats['candidate_centers'] % 5000==0: LOG.info('Checked %s circle centers; selected %s',stats['candidate_centers'],stats['circles'])
             stats['duplicate_centers_removed'] = count-stats['candidate_centers']
         stats['points_in_selected_circles'] = int(included.sum())
-        for seq,code,payload in db.execute('SELECT seq,region,payload FROM points ORDER BY seq'):
-            if config['points_scope']=='selected_circles' and not included[seq]: continue
-            row = json.loads(payload)
-            data = {field:row.get(field) for field in LABELS if field in row}
-            feature = placemark(row['point_name'],data,(float(row['lon']),float(row['lat'])),
-                                'telecom' if row.get('is_telecom')=='1' else 'poi')
-            layers.write('points',code,feature);stats['points_exported'] += 1
+        if config['export_points']:
+            for seq,code,payload in db.execute('SELECT seq,region,payload FROM points ORDER BY seq'):
+                if config['points_scope']=='selected_circles' and not included[seq]: continue
+                row = json.loads(payload)
+                data = {field:row.get(field) for field in LABELS if field in row}
+                feature = placemark(row['point_name'],data,(float(row['lon']),float(row['lat'])),
+                                    'telecom' if row.get('is_telecom')=='1' else 'poi')
+                layers.write('points',code,feature);stats['points_exported'] += 1
         visible_codes = [c for c in names if (c or config['include_unassigned']) and (config['regions'] is None or c in config['regions'])]
-        for kind in ['circles','points']:
+        for kind in (['circles','points'] if config['export_points'] else ['circles']):
             for code in sorted(visible_codes):
                 if not layers.parts[kind,code]: layers.start(kind,code)
         layers.close()
@@ -304,7 +310,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
             if seen!=file['features']: raise ValueError('KML feature count verification failed')
         if _hash_file(source)!=source_hash: raise ValueError('Source CSV changed during KML generation')
         report = {'status':'KML_EXPORT_SUCCESS','source_run':str(source_reference or run),'source_status':info['status'],
-                  'source_csv_sha256':source_hash,'output':str(destination),'archive':str(archive_path),
+                  'renderer_version':RENDERER_VERSION,'source_csv_sha256':source_hash,'output':str(destination),'archive':str(archive_path),
                   'config':config,'counts':dict(stats),'files':layers.files,'file_checks_ok':True,
                   'layers_kept':bool(keep_unpacked),'layer_paths':'ZIP entries',
                   'license':'ODbL-1.0; © OpenStreetMap contributors',

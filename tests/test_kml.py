@@ -14,7 +14,7 @@ from poi_osm.kml import NS, build, circle, neighbors, validate
 from poi_osm.teradata_export import export
 
 GEOD = Geod(ellps='WGS84')
-BASE = {'circle_mode':'per_point','radius_m':60,'min_count':5,'count_mode':'distinct_names','points_scope':'all_named',
+BASE = {'export_points':True,'circle_mode':'per_point','radius_m':60,'min_count':5,'count_mode':'distinct_names','points_scope':'all_named',
         'circle_vertices':72,'max_features_per_file':10000,'osm_types':['node','way'],
         'include_unassigned':False,'telecom_only':False,'exclude_chains':False,'regions':None}
 

@@ -14,5 +14,6 @@
   "exclude_chains": false,
   "regions": null,
   "circle_mode": "visit_zones",
-  "zone_overlap_threshold": 0.8
+  "zone_overlap_threshold": 0.8,
+  "export_points": false
 }
