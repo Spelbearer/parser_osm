@@ -346,6 +346,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
                  boundaries_reviewed=True,complete_coverage_verified=True,production=True,unresolved_objects=0,
                  boundary_report={'candidate_region_count':len(regions['regions']),'missing_region_codes':[],
                                   'conflicting_region_codes':[],'invalid_boundary_codes':{},'review_required':False})
+    if manifest.get('download'): state['download']=manifest['download']
     atomic_json(bundle/'.state/last_success.json',state)
     report={'status':'PRODUCT_SUCCESS','version':__version__,'product_run_id':run_id,'source_date':manifest['source_date'],
             'output':str(root/'result'),'archive':str(root/'result/poi_layers.zip'),
@@ -353,6 +354,8 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
             'unassigned_objects':export['regional_export']['by_region'].get('',0),'file_checks_ok':True,
             'production_ready':True,'keep_results':1,'temporary_files_removed':False,
             'metrics':manifest['metrics'],'source_files':len(manifest['sources']),'region_mapping':region_mapping}
+    if manifest.get('download'):
+        atomic_json(bundle/'analysis/downloads.json',manifest['download'])
     atomic_json(bundle/'analysis/summary.json',report)
     return bundle,report
 
@@ -371,11 +374,11 @@ def render_in_child(registry, manifest, root, work, config, run_id, review, reus
     return bundle, result['report']
 
 
-def run_collection(root, work, config):
+def run_collection(root, work, config, input_folder=None):
     transient=work/'collection';(transient/'state').mkdir(parents=True)
     previous=root/'result/.state/last_success.json'
     if previous.exists(): atomic_json(transient/'state/last_success.json',read(previous))
-    args=[sys.executable,'-m','poi_osm.collection',config['input_folder'],'--output',str(transient),
+    args=[sys.executable,'-m','poi_osm.collection',str(input_folder or config['input_folder']),'--output',str(transient),
           '--config',str(root/config['settings']),'--profile',str(root/config['collection_profile']),'--production','--registry-only']
     LOG.info('Extracting the current PBF snapshot; temporary caches will be removed after completion')
     return run_logged_child(args,work/'collection-result.json',work,'Collection')
@@ -430,14 +433,15 @@ def alive(pid):
     except PermissionError: return True
 
 
-def validate_product(root, config):
+def validate_product(root, config, *, local_inputs=True):
     if config.get('keep_results')!=1: raise ValueError('This product profile keeps only the latest successful result')
     limit=config.get('logs_to_keep',10)
     if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=100:
         raise ValueError('logs_to_keep must be between 1 and 100')
-    inputs=Path(config['input_folder']).resolve()
-    if inputs.is_relative_to(root) or root.is_relative_to(inputs):
-        raise ValueError('PBF inputs and product outputs must be separate directories')
+    if local_inputs:
+        inputs=Path(config['input_folder']).resolve()
+        if inputs.is_relative_to(root) or root.is_relative_to(inputs):
+            raise ValueError('PBF inputs and product outputs must be separate directories')
     current=root/'result'
     if current.exists() and not (current/'.state/registry.sqlite').is_file():
         raise ValueError('Previous registry is missing; restore result/.state before updating')
@@ -459,7 +463,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
         recover_swap(root)
         if action!='adopt' and (root/'state').exists():
             legacy_locks.enter_context(process_lock(root/'state/process.lock'))
-        logs_limit=validate_product(root,read(root/'product.json')) if (root/'product.json').exists() else 10
+        logs_limit=validate_product(root,read(root/'product.json'),local_inputs=action!='download') if (root/'product.json').exists() else 10
         old_work=root/'.work'
         if old_work.exists():
             for item in old_work.iterdir():
@@ -479,7 +483,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 # Read-only source verification runs before configuration is saved.
                 inspect_sources(Path(input_folder),profile_from(Path(profile_path)))
                 config=configure_product(root,settings_path,profile_path,boundary,input_folder)
-                logs_limit=validate_product(root,config)
+                logs_limit=validate_product(root,config,local_inputs=action!='download')
                 LOG.info('Configuration initialized; run the same command without --init to process PBF')
                 return {'status':'PRODUCT_INITIALIZED','version':__version__,'root':str(root),'input_folder':config['input_folder']}
             if action=='adopt':
@@ -501,7 +505,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
             else:
                 if not (root/'product.json').exists(): raise ValueError('First use --adopt with the existing reviewed production result')
                 config=read(root/'product.json')
-                logs_limit=validate_product(root,config)
+                logs_limit=validate_product(root,config,local_inputs=action!='download')
                 check_publish_access(root,work,run_id)
                 if action=='files':
                     if not (root/'result/.state/last_success.json').exists():
@@ -509,9 +513,16 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                     manifest=read(root/'result/.state/last_success.json');registry=Path(manifest['registry'])
                     review=root/'result/analysis/review.csv';reuse=root/'result/analysis/kml_summary.json'
                 else:
-                    manifest=run_collection(root,work,config);registry=Path(manifest['registry'])
+                    if action=='download':
+                        from .geofabrik import attach_provenance, download_collection
+                        download=download_collection(profile_from(root/config['collection_profile']),work/'downloads')
+                        manifest=run_collection(root,work,config,input_folder=work/'downloads')
+                        attach_provenance(manifest,download)
+                    else:
+                        manifest=run_collection(root,work,config)
+                    registry=Path(manifest['registry'])
                     review=Path(manifest['output'])/'review.csv';reuse=None
-            logs_limit=validate_product(root,config)
+            logs_limit=validate_product(root,config,local_inputs=action!='download')
             bundle,report=render_in_child(registry,manifest,root,work,config,run_id,review,reuse)
             publish(bundle,root,work,run_id)
             legacy_locks.close()
@@ -555,6 +566,7 @@ def main(argv=None):
     group.add_argument('--adopt',action='store_true',help='Migrate a reviewed successful legacy result and remove recognised legacy artifacts')
     group.add_argument('--load-teradata',action='store_true',help='Replace the Teradata table with the last verified POI snapshot')
     group.add_argument('--check-teradata',action='store_true',help='Validate the last snapshot against Teradata column limits without connecting')
+    group.add_argument('--download',action='store_true',help='Download the agreed Geofabrik extracts temporarily, then build a fresh snapshot')
     group.add_argument('--files',action='store_true',help='Regenerate CSV/Parquet/KML from the saved registry, without PBF')
     parser.add_argument('--input',type=Path,help='Local folder of all federal-district PBFs for --init')
     parser.add_argument('--boundaries',type=Path,help='Previously reviewed complete GeoJSON for --init')
@@ -571,7 +583,7 @@ def main(argv=None):
     if not args.init and (args.input is not None or args.boundaries is not None):
         parser.error('--input and --boundaries are only valid with --init; edit product.json for an existing installation')
     if args.init and (args.input is None or args.boundaries is None): parser.error('--init requires --input and --boundaries')
-    report=execute(args.root,'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'run',args.settings,args.profile,input_folder=args.input,boundary=args.boundaries)
+    report=execute(args.root,'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input,boundary=args.boundaries)
     if report['status']=='PRODUCT_INITIALIZED':
         print(json.dumps(report,ensure_ascii=False,indent=2));return 0
     brief={key:report[key] for key in ['status','output','archive','total_objects','unassigned_objects','cleanup_complete']}

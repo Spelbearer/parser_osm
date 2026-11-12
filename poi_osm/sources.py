@@ -236,13 +236,13 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
     # File format selection in osmium cannot infer PBF from .part suffix.
     pbf_temporary = temporary.with_suffix("")
     os.close(descriptor)
-    os.replace(temporary, pbf_temporary)
-    temporary = pbf_temporary
     metadata_temp = metadata_path.with_suffix(".json.part")
     try:
         digest = hashlib.sha256()
         publisher_digest = hashlib.new(algorithm)
         size = 0
+        next_progress = 64 * CHUNK_SIZE
+        last_progress = time.monotonic()
         with _request(session, "GET", url, stream=True, timeout=(15, 120), headers={"Accept-Encoding": "identity"}) as response:
             response.raise_for_status()
             final_url = _https(response.url)
@@ -261,6 +261,11 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
                     stream.write(block)
                     digest.update(block)
                     publisher_digest.update(block)
+                    if size >= next_progress or time.monotonic() - last_progress >= 15:
+                        LOGGER.info('DOWNLOAD %s: %.1f MiB%s', Path(urlsplit(url).path).name, size / CHUNK_SIZE,
+                                    f' / {declared_size / CHUNK_SIZE:.1f} MiB' if declared_size else '')
+                        next_progress = size + 64 * CHUNK_SIZE
+                        last_progress = time.monotonic()
                 stream.flush()
                 os.fsync(stream.fileno())
             if not size or (declared_size is not None and size != declared_size):
@@ -268,6 +273,8 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
             modified = response.headers.get("Last-Modified")
         if publisher_digest.hexdigest() != expected:
             raise SourceError("Downloaded snapshot publisher checksum mismatch")
+        os.replace(temporary, pbf_temporary)
+        temporary = pbf_temporary
         metadata = {
             "source_date": _snapshot_date(temporary, config, modified),
             "source_url": url, "resolved_url": final_url,
