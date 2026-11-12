@@ -453,7 +453,7 @@ def validate_product(root, config, *, local_inputs=True):
     return limit
 
 
-def execute(root, action, settings_path=None, profile_path=None, *, input_folder=None, boundary=None):
+def execute(root, action, settings_path=None, profile_path=None, *, input_folder=None, boundary=None, windows_proxy=False):
     root=Path(root).resolve();root.mkdir(parents=True,exist_ok=True)
     (root/'logs').mkdir(exist_ok=True)
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')+'-'+uuid.uuid4().hex[:8]
@@ -515,7 +515,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 else:
                     if action=='download':
                         from .geofabrik import attach_provenance, download_collection
-                        download=download_collection(profile_from(root/config['collection_profile']),work/'downloads')
+                        download=download_collection(profile_from(root/config['collection_profile']),work/'downloads',windows_proxy=windows_proxy)
                         manifest=run_collection(root,work,config,input_folder=work/'downloads')
                         attach_provenance(manifest,download)
                     else:
@@ -568,11 +568,14 @@ def main(argv=None):
     group.add_argument('--check-teradata',action='store_true',help='Validate the last snapshot against Teradata column limits without connecting')
     group.add_argument('--download',action='store_true',help='Download the agreed Geofabrik extracts temporarily, then build a fresh snapshot')
     group.add_argument('--files',action='store_true',help='Regenerate CSV/Parquet/KML from the saved registry, without PBF')
+    parser.add_argument('--windows-proxy',action='store_true',help='For --download: Windows SSPI Negotiate via HTTPS_PROXY, with Schannel revocation best-effort')
     parser.add_argument('--input',type=Path,help='Local folder of all federal-district PBFs for --init')
     parser.add_argument('--boundaries',type=Path,help='Previously reviewed complete GeoJSON for --init')
     parser.add_argument('--settings',type=Path,help='Settings template for initialization or legacy migration')
     parser.add_argument('--profile',type=Path,help='Collection profile for initialization or legacy migration')
     args=parser.parse_args(argv)
+    if args.windows_proxy and not args.download:
+        parser.error('--windows-proxy is only valid with --download')
     if args.load_teradata or args.check_teradata:
         if any(value is not None for value in (args.input, args.boundaries, args.settings, args.profile)):
             parser.error('Teradata modes only accept --root')
@@ -583,7 +586,7 @@ def main(argv=None):
     if not args.init and (args.input is not None or args.boundaries is not None):
         parser.error('--input and --boundaries are only valid with --init; edit product.json for an existing installation')
     if args.init and (args.input is None or args.boundaries is None): parser.error('--init requires --input and --boundaries')
-    report=execute(args.root,'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input,boundary=args.boundaries)
+    report=execute(args.root,'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input,boundary=args.boundaries,windows_proxy=args.windows_proxy)
     if report['status']=='PRODUCT_INITIALIZED':
         print(json.dumps(report,ensure_ascii=False,indent=2));return 0
     brief={key:report[key] for key in ['status','output','archive','total_objects','unassigned_objects','cleanup_complete']}

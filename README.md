@@ -1,4 +1,4 @@
-# POI OSM 0.9.0rc8
+# POI OSM 0.9.0rc9
 
 Кандидат выпуска: сборка POI, актуализация, очистка, CSV/Parquet, KML ZIP и загрузка полного снимка в Teradata.
 
@@ -38,6 +38,8 @@ git pull
 ```powershell
 .\.venv\Scripts\python.exe run.py --root "D:\osm_results" --download
 ```
+
+Для корпоративного Windows-прокси с Negotiate используйте `--download --windows-proxy` и задайте HTTPS_PROXY. Авторизация выполняется текущей учётной записью через curl.exe; пароль не требуется.
 
 Исходная папка PBF в этом режиме не нужна. После успеха или обработанной ошибки временные загрузки удаляются. Для корпоративного прокси и подробностей см. [производственную инструкцию](docs/product.md#скачивание-geofabrik).
 

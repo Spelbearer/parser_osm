@@ -13,7 +13,7 @@ LOG = logging.getLogger(__name__)
 BASE_URL = 'https://download.geofabrik.de/russia/'
 
 
-def download_collection(profile, folder):
+def download_collection(profile, folder, *, windows_proxy=False):
     approved = json.loads((CONFIG/'collection.json').read_text(encoding='utf-8'))
     if (profile.get('coverage_id') != approved['coverage_id']
             or set(profile['expected_extracts']) != set(approved['expected_extracts'])
@@ -22,6 +22,11 @@ def download_collection(profile, folder):
         raise ValueError('Geofabrik download requires the agreed complete eight-extract profile and coverage')
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=False)
+    session_factory = None
+    if windows_proxy:
+        from .windows_proxy import WindowsProxySession
+        session_factory = lambda: WindowsProxySession(folder)
+        LOG.info('DOWNLOAD transport: Windows curl, SSPI Negotiate, Schannel revocation best-effort')
     downloaded = []
     for number, extract in enumerate(profile['expected_extracts'], 1):
         filename = extract+'-latest.osm.pbf'
@@ -31,7 +36,7 @@ def download_collection(profile, folder):
             'url': url, 'checksum_url': url+'.md5', 'checksum_algorithm': 'md5',
             'coverage_id': profile['coverage_id'], 'complete': False,
             'max_age_days': profile.get('max_age_days', 45), 'retries': 3,
-        }]}, folder, force=True)
+        }]}, folder, force=True, session_factory=session_factory)
         target = folder/filename
         Path(source['path']).replace(target)
         (folder/(filename+'.md5')).write_text(source['publisher_checksum']+'  '+filename+'\n', encoding='ascii')
@@ -41,6 +46,8 @@ def download_collection(profile, folder):
     # Header timestamps must agree for the entire set before any POI extraction.
     checked, _ = inspect_sources(folder, profile)
     return {'provider': 'Geofabrik', 'storage': 'temporary', 'files': downloaded,
+            'transport': 'windows-sspi-negotiate' if windows_proxy else 'requests',
+            'tls_revocation': 'best-effort' if windows_proxy else 'default',
             'total_bytes': sum(item['size_bytes'] for item in downloaded),
             'source_date': checked[0]['source_date'], 'replication_timestamp': checked[0]['replication_timestamp'],
             'checksums_verified': True, 'complete_set_verified': True}

@@ -261,7 +261,7 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
                     stream.write(block)
                     digest.update(block)
                     publisher_digest.update(block)
-                    if size >= next_progress or time.monotonic() - last_progress >= 15:
+                    if not getattr(response, "progress_reported", False) and (size >= next_progress or time.monotonic() - last_progress >= 15):
                         LOGGER.info('DOWNLOAD %s: %.1f MiB%s', Path(urlsplit(url).path).name, size / CHUNK_SIZE,
                                     f' / {declared_size / CHUNK_SIZE:.1f} MiB' if declared_size else '')
                         next_progress = size + 64 * CHUNK_SIZE
@@ -296,7 +296,7 @@ def _download(session: requests.Session, config: dict, source_dir: Path) -> dict
         metadata_temp.unlink(missing_ok=True)
 
 
-def obtain_source(settings: dict, source_dir: Path, force: bool = False) -> dict:
+def obtain_source(settings: dict, source_dir: Path, force: bool = False, *, session_factory=None) -> dict:
     """Return a verified fresh local snapshot, trying configured fallbacks.
 
     ``complete`` remains the explicit operator assertion from configuration;
@@ -315,7 +315,7 @@ def obtain_source(settings: dict, source_dir: Path, force: bool = False) -> dict
     source_dir.mkdir(parents=True, exist_ok=True)
     failures = []
     expected_coverage = settings.get("coverage_id")
-    with requests.Session() as session:
+    with (session_factory or requests.Session)() as session:
         session.headers["User-Agent"] = "parser_osm/1.0 (OSM snapshot POI pipeline)"
         for config in configs:
             try:
