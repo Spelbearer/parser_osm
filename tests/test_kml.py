@@ -206,6 +206,14 @@ def zone_data(node):
     return {item.attrib['name']:item.find('{'+NS+'}value').text for item in node.findall('.//{'+NS+'}Data')}
 
 
+def displayed_center(node):
+    coordinates=node.find('.//{'+NS+'}LinearRing/{'+NS+'}coordinates').text.split()
+    first=tuple(map(float,coordinates[0].split(',')[:2]))
+    opposite=tuple(map(float,coordinates[(len(coordinates)-1)//2].split(',')[:2]))
+    bearing,_,distance=GEOD.inv(*first,*opposite)
+    return GEOD.fwd(*first,bearing,distance/2)[:2]
+
+
 def test_visit_zone_replaces_five_circles_and_reports_business_counts(tmp_path):
     root=source(tmp_path)
     report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones'))
@@ -213,9 +221,10 @@ def test_visit_zone_replaces_five_circles_and_reports_business_counts(tmp_path):
     assert report['counts']['points_exported']==6
     assert report['counts']['points_in_selected_circles']==5
     data=zone_data(kml_nodes(report,'circles')[0])
-    assert data['poi_count']==data['distinct_names']=='5'
+    assert data['poi_count']=='5'
+    assert set(data)=={'poi_count','chain_count','telecom_count','region_name','radius_m'}
     assert data['telecom_count']==data['chain_count']=='1'
-    assert float(data['center_lon'])!=37
+    assert displayed_center(kml_nodes(report,'circles')[0])[0]!=37
     assert 'center_osm_id' not in data
 
 
@@ -229,10 +238,18 @@ def test_zone_center_between_points_finds_group_missed_by_poi_centers(tmp_path):
     data=zone_data(kml_nodes(report,'circles')[0])
     assert data['poi_count']=='5' and data['telecom_count']=='2' and data['chain_count']=='1'
     for lon,lat in coordinates:
-        assert GEOD.inv(float(data['center_lon']),float(data['center_lat']),lon,lat)[2]<60
+        assert GEOD.inv(*displayed_center(kml_nodes(report,'circles')[0]),lon,lat)[2]<60
 
 
-def test_long_street_is_split_into_compact_zones_without_losing_point_layer(tmp_path):
+def test_long_street_is_split_into_compact_zones_without_losing_point_layer(tmp_path,monkeypatch):
+    from poi_osm import kml
+    original=kml.select_zones
+    captured=[]
+    def track(*args,**kwargs):
+        for zone in original(*args,**kwargs):
+            captured.append(dict(zone))
+            yield zone
+    monkeypatch.setattr(kml,'select_zones',track)
     coordinates=[GEOD.fwd(37,55,90,i*20)[:2] for i in range(20)]
     root=zone_source(tmp_path,coordinates)
     report=build(root,tmp_path/'out',config(tmp_path,circle_mode='visit_zones'))
@@ -240,9 +257,9 @@ def test_long_street_is_split_into_compact_zones_without_losing_point_layer(tmp_
     assert 1<len(zones)<20 and report['counts']['points_exported']==20
     assert report['counts']['near_duplicate_zones_removed']>0
     memberships=[]
-    for node in zones:
+    for node,internal in zip(zones,captured):
         data=zone_data(node)
-        ids={i for i,(lon,lat) in enumerate(coordinates) if GEOD.inv(float(data['center_lon']),float(data['center_lat']),lon,lat)[2]<60}
+        ids={i for i,(lon,lat) in enumerate(coordinates) if GEOD.inv(internal['center_lon'],internal['center_lat'],lon,lat)[2]<60}
         assert len(ids)==int(data['poi_count']) and 5<=len(ids)<=7
         assert all(len(ids & old)/min(len(ids),len(old))<0.8 for old in memberships)
         memberships.append(ids)

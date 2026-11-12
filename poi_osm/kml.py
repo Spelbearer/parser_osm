@@ -31,7 +31,7 @@ LOG = logging.getLogger(__name__)
 NS = 'http://www.opengis.net/kml/2.2'
 ET.register_namespace('',NS)
 GEOD = Geod(ellps='WGS84')
-RENDERER_VERSION = 2
+RENDERER_VERSION = 3
 POINT_ICON = 'http://maps.google.com/mapfiles/kml/paddle/ltblu-blank.png'
 LABELS = {'point_name':'Название','osm_type':'Тип OSM','osm_id':'ID OSM','address':'Адрес',
           'region_name':'Регион','region_code':'Код региона','primary_category':'Категория','primary_subcategory':'Подкатегория',
@@ -39,7 +39,7 @@ LABELS = {'point_name':'Название','osm_type':'Тип OSM','osm_id':'ID O
           'telecom_type':'Тип телефонии','is_chain':'Крупная сеть','chain_name':'Название сети',
           'center_osm_type':'Тип OSM центра','center_osm_id':'ID OSM центра','radius_m':'Радиус, м',
           'zone_id':'Зона посещения','center_lon':'Долгота центра','center_lat':'Широта центра',
-          'telecom_count':'Точек телефонии','chain_count':'Точек крупных сетей','distinct_names':'Разных названий','poi_count':'Объектов POI','count_mode':'Способ подсчёта'}
+          'telecom_count':'Точек телефонии','chain_count':'Точек крупных сетей','distinct_names':'Разных названий','poi_count':'Точек в зоне','count_mode':'Способ подсчёта'}
 
 
 def clean(value):
@@ -267,8 +267,9 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
                 ids = zone.pop('members');representative = zone.pop('representative')
                 code = db.execute('SELECT region FROM points WHERE seq=?',(representative,)).fetchone()[0]
                 included[ids] = True
-                data = {**zone,'count_mode':config['count_mode'],'region_name':names[code]}
-                title = f"Зона — {zone['poi_count']} POI, {zone['distinct_names']} названий, телефония: {zone['telecom_count']}, сети: {zone['chain_count']}"
+                data = {field:zone[field] for field in ('poi_count','chain_count','telecom_count')}
+                data.update(region_name=names[code],radius_m=config['radius_m'])
+                title = f"Зона — {zone['poi_count']} точек, сети: {zone['chain_count']}, телефония: {zone['telecom_count']}"
                 layers.write('circles',code,placemark(title,data,circle(zone['center_lon'],zone['center_lat'],config['radius_m'],config['circle_vertices']),'circle'))
                 stats['circles'] += 1
         else:
@@ -279,11 +280,10 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
                 stats['candidate_centers'] += 1
                 if metric >= config['min_count']:
                     included[ids] = True
-                    center = json.loads(db.execute('SELECT payload FROM points WHERE seq=?',(seq,)).fetchone()[0])
-                    data = {'center_osm_type':center['osm_type'],'center_osm_id':center['osm_id'],
-                            'radius_m':config['radius_m'],'distinct_names':distinct,'poi_count':len(ids),
-                            'count_mode':config['count_mode'],'region_name':names[code]}
-                    feature = placemark(f"{center['point_name']} — {distinct} названий, {len(ids)} POI",data,
+                    data = {'poi_count':len(ids),'chain_count':int(chains[ids].sum()),'telecom_count':int(telecom[ids].sum()),
+                            'region_name':names[code],'radius_m':config['radius_m']}
+                    title = f"Зона — {len(ids)} точек, сети: {data['chain_count']}, телефония: {data['telecom_count']}"
+                    feature = placemark(title,data,
                                         circle(lon,lat,config['radius_m'],config['circle_vertices']),'circle')
                     layers.write('circles',code,feature);stats['circles'] += 1
                 if stats['candidate_centers'] % 5000==0: LOG.info('Checked %s circle centers; selected %s',stats['candidate_centers'],stats['circles'])
