@@ -69,11 +69,11 @@ def test_warehouse_snapshot_priority_change_keeps_the_same_key(collection):
     assert first['object_export']['primary_rules_sha256']!=second['object_export']['primary_rules_sha256']
 
 
-def test_warehouse_sql_key_and_merge_do_not_include_primary_tag():
+def test_warehouse_sql_documents_user_table_and_object_key():
     sql = (Path(__file__).resolve().parents[1]/'docs/teradata_compact.sql').read_text(encoding='utf-8')
-    assert 'UNIQUE PRIMARY INDEX ("OSM_TYPE", "OSM_ID")' in sql
-    on_clause = sql.split('ON t.')[1].split('WHEN MATCHED')[0]
-    assert 'PRIMARY_TAG' not in on_clause
+    assert 'CREATE MULTISET TABLE SBX_OPERATION.DAK_POI_ISH' in sql
+    assert 'PRIMARY INDEX (OSM_TYPE_ID)' in sql
+    assert 'PRIMARY_TAG' not in sql
 
 
 def test_real_multicategory_telecom_object_has_one_warehouse_row(tmp_path):

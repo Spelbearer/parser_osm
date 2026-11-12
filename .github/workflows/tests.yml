@@ -16,6 +16,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip install -r requirements-teradata.txt
+      - run: python -c "import teradatasql, keyring"
       - run: python -m ruff check .
       - run: python -m pytest -q
       - run: python run.py --version

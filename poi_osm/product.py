@@ -496,12 +496,21 @@ def main(argv=None):
     group=parser.add_mutually_exclusive_group()
     group.add_argument('--init',action='store_true',help='Initialize a new installation using previously reviewed boundaries')
     group.add_argument('--adopt',action='store_true',help='Migrate a reviewed successful legacy result and remove recognised legacy artifacts')
+    group.add_argument('--load-teradata',action='store_true',help='Replace the Teradata table with the last verified POI snapshot')
+    group.add_argument('--check-teradata',action='store_true',help='Validate the last snapshot against Teradata column limits without connecting')
     group.add_argument('--files',action='store_true',help='Regenerate CSV/Parquet/KML from the saved registry, without PBF')
     parser.add_argument('--input',type=Path,help='Local folder of all federal-district PBFs for --init')
     parser.add_argument('--boundaries',type=Path,help='Previously reviewed complete GeoJSON for --init')
     parser.add_argument('--settings',type=Path,help='Settings template for initialization or legacy migration')
     parser.add_argument('--profile',type=Path,help='Collection profile for initialization or legacy migration')
     args=parser.parse_args(argv)
+    if args.load_teradata or args.check_teradata:
+        if any(value is not None for value in (args.input, args.boundaries, args.settings, args.profile)):
+            parser.error('Teradata modes only accept --root')
+        from .teradata_load import execute as load_teradata
+        report=load_teradata(args.root,check_only=args.check_teradata)
+        print(json.dumps(report,ensure_ascii=False,indent=2))
+        return 0
     if not args.init and (args.input is not None or args.boundaries is not None):
         parser.error('--input and --boundaries are only valid with --init; edit product.json for an existing installation')
     if args.init and (args.input is None or args.boundaries is None): parser.error('--init requires --input and --boundaries')

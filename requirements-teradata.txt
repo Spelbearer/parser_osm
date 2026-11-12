@@ -1,0 +1,3 @@
+# Optional dependencies for --load-teradata (Python 3.11/3.13).
+teradatasql==20.0.0.75
+keyring==25.7.0
