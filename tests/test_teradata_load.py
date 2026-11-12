@@ -158,6 +158,7 @@ def test_check_only_and_invalid_source_never_connect(tmp_path):
 
     report = execute(tmp_path, check_only=True, connect=forbidden)
     assert report['status'] == 'TERADATA_CHECK_SUCCESS' and report['rows'] == 1
+    assert report['unicode_pass_through_requested'] and not report['unicode_pass_through_enabled']
     save(source, [row(point_name='x'*256)])
     with pytest.raises(ValueError, match='POINT_NAME'):
         execute(tmp_path, connect=forbidden)
@@ -198,6 +199,7 @@ def test_execute_load_reports_success_and_keeps_source(tmp_path):
     con = Connection()
     report = execute(tmp_path, connect=lambda **kw: con, password='p@ss')
     assert report['status'] == 'TERADATA_LOAD_SUCCESS' and con.committed == 1
+    assert report['unicode_pass_through_enabled']
     assert source.read_bytes() == saved
     assert json.loads((result/'analysis/teradata_load.json').read_text()) == report
 
@@ -208,3 +210,71 @@ def test_point_name_255_is_preserved_and_other_limits_stay_100():
     assert values['POINT_NAME'] == name
     with pytest.raises(ValueError, match=r'VARCHAR\(100\) exceeded: CHAIN_NAME'):
         convert(row(chain_name='с' * 101))
+
+
+def test_extended_unicode_is_preserved_and_audited(tmp_path):
+    from poi_osm.teradata_load import audit_unicode
+    name = 'Ремонт телефонов 📱'
+    source = tmp_path/'poi.csv'; save(source, [row(point_name=name), row(osm_id='124')])
+    original = source.read_bytes()
+    output = tmp_path/'unicode.csv'
+    report = audit_unicode(source, output)
+    assert report['rows_with_extended_unicode'] == 1
+    assert report['extended_characters'] == 1
+    with output.open(encoding='utf-8-sig', newline='') as stream:
+        entries = list(csv.DictReader(stream, delimiter=';'))
+    assert entries[0]['osm_type_id'] == 'way/123' and entries[0]['column'] == 'POINT_NAME'
+    assert entries[0]['codepoints'] == 'U+1F4F1'
+    con = Connection()
+    options = {}
+
+    def connect(**kwargs):
+        options.update(kwargs)
+        return con
+
+    replace_snapshot(source, 2, connect=connect, password='p@ss')
+    assert options['charset'] == 'UTF8'
+    assert con.statements[0] == 'SET SESSION CHARACTER SET UNICODE PASS THROUGH ON'
+    assert con.pending[0][COLUMNS.index('POINT_NAME')] == name
+    assert source.read_bytes() == original
+
+
+def test_unicode_session_setup_failure_stops_before_delete(tmp_path):
+    source = tmp_path/'poi.csv'; save(source, [row()])
+    con = Connection()
+    original = con.cur.execute
+
+    def execute_sql(sql):
+        if sql.startswith('SET SESSION'):
+            raise RuntimeError('Unicode Pass Through not available')
+        original(sql)
+
+    con.cur.execute = execute_sql
+    with pytest.raises(RuntimeError, match='Unicode Pass Through not available'):
+        replace_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
+    assert not any(sql.startswith('DELETE') for sql in con.statements)
+    assert con.rolled_back == 1 and con.committed == 0
+
+
+def test_batch_diagnostics_are_read_before_rollback_and_masked(tmp_path):
+    source = tmp_path/'poi.csv'; save(source, [row()])
+    con = Connection(fail_insert=True)
+
+    def native_sql(sql):
+        assert con.rolled_back == 0
+        assert sql == '{fn teradata_get_errors}'
+        return 'row 1: invalid character p@ss'
+
+    con.nativeSQL = native_sql
+    with pytest.raises(RuntimeError) as error:
+        replace_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
+    assert 'Batch object rows 1-1' in str(error.value)
+    assert 'driver batch details: row 1: invalid character' in str(error.value)
+    assert 'p@ss' not in str(error.value)
+    assert con.rolled_back == 1
+
+
+@pytest.mark.parametrize('name', ['bad\x00name', 'bad\ud800name'])
+def test_invalid_unicode_rejected_before_database(name):
+    with pytest.raises(ValueError, match='Invalid Unicode scalar or NUL: POINT_NAME'):
+        convert(row(point_name=name))

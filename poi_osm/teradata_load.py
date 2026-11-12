@@ -53,6 +53,8 @@ def convert(row):
     values['IS_TELECOM'] = int(values['IS_TELECOM']) if values['IS_TELECOM'] is not None else None
     values['UPDATE_DATE'] = date.fromisoformat(values['UPDATE_DATE']) if values['UPDATE_DATE'] else None
     for column, value in values.items():
+        if isinstance(value, str) and any(ord(char) == 0 or 0xD800 <= ord(char) <= 0xDFFF for char in value):
+            raise ValueError('Invalid Unicode scalar or NUL: ' + column)
         limit = 255 if column == 'POINT_NAME' else 100
         if isinstance(value, str) and len(value.encode('utf-16-le')) // 2 > limit:
             raise ValueError(f'VARCHAR({limit}) exceeded: {column}')
@@ -94,6 +96,34 @@ def validate(path, keys_path):
     return total
 
 
+
+def audit_unicode(path, output):
+    """List extended Unicode code points for diagnosis; keep source text intact."""
+    temporary = output.with_suffix('.csv.tmp')
+    rows = fields = characters = 0
+    try:
+        with path.open(encoding='utf-8-sig', newline='') as source, temporary.open('w', encoding='utf-8-sig', newline='') as saved:
+            reader = csv.DictReader(source, delimiter=';')
+            writer = csv.writer(saved, delimiter=';')
+            writer.writerow(['object_row', 'osm_type_id', 'column', 'codepoints', 'characters'])
+            for number, row in enumerate(reader, 1):
+                affected = False
+                for column, name in SOURCE.items():
+                    extended = [char for char in row[name] if ord(char) > 0xFFFF]
+                    if extended:
+                        writer.writerow([number, row['osm_type'] + '/' + row['osm_id'], column,
+                                         ','.join(f'U+{ord(char):04X}' for char in sorted(set(extended))), len(extended)])
+                        affected = True
+                        fields += 1
+                        characters += len(extended)
+                rows += affected
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {'rows_with_extended_unicode': rows, 'fields_with_extended_unicode': fields,
+            'extended_characters': characters, 'report': str(output)}
+
+
 def password_for(user):
     password = os.environ.get('POI_TD_PASSWORD')
     if not password:
@@ -115,9 +145,11 @@ def replace_snapshot(path, total, *, connect=None, password=None):
     committed = False
     commit_started = False
     try:
-        con = connect(host=HOST, user=user, password=password, logmech='LDAP', tmode='ANSI')
+        con = connect(host=HOST, user=user, password=password, logmech='LDAP', tmode='ANSI', charset='UTF8')
         con.autocommit = False
         cur = con.cursor()
+        cur.execute('SET SESSION CHARACTER SET UNICODE PASS THROUGH ON')
+        LOG.info('Teradata: UTF8, Unicode Pass Through enabled')
         cur.execute(f'SELECT * FROM {TABLE} WHERE 1 = 0')
         missing = set(COLUMNS) - {entry[0].upper() for entry in cur.description}
         if missing:
@@ -130,7 +162,16 @@ def replace_snapshot(path, total, *, connect=None, password=None):
         sql = f'INSERT INTO {TABLE} ({columns}) VALUES ({",".join("?" for _ in COLUMNS)})'
         sent = 0
         for batch in batches(path):
-            cur.executemany(sql, batch)
+            try:
+                cur.executemany(sql, batch)
+            except Exception as error:
+                details = ''
+                try:
+                    details = str(con.nativeSQL('{fn teradata_get_errors}'))
+                except Exception:
+                    pass
+                suffix = f'; driver batch details: {details}' if details else ''
+                raise RuntimeError(f'Batch object rows {sent+1}-{sent+len(batch)} failed: {error}{suffix}') from None
             sent += len(batch)
             LOG.info('Teradata: %d/%d rows sent; awaiting COMMIT', sent, total)
         cur.execute(f'SELECT COUNT(*), COUNT(DISTINCT OSM_TYPE_ID) FROM {TABLE}')
@@ -144,6 +185,7 @@ def replace_snapshot(path, total, *, connect=None, password=None):
         if con is not None and not committed:
             try:
                 con.rollback()
+                LOG.info('Teradata: ROLLBACK completed')
             except Exception:
                 LOG.error('Rollback could not be confirmed; check Teradata before retrying')
         if isinstance(error, (KeyboardInterrupt, SystemExit)):
@@ -185,6 +227,8 @@ def execute(root, *, check_only=False, connect=None, password=None):
                 total = validate(snapshot, Path(temporary) / 'keys.sqlite')
                 if total != summary['total_objects']:
                     raise ValueError('CSV row count differs from product summary')
+                unicode_audit = audit_unicode(snapshot, analysis / 'teradata_unicode.csv')
+                LOG.info('Unicode audit: %d objects with supplementary characters; text preserved', unicode_audit['rows_with_extended_unicode'])
                 with snapshot.open('rb') as stream:
                     digest = hashlib.file_digest(stream, 'sha256').hexdigest()
                 if not check_only:
@@ -192,6 +236,7 @@ def execute(root, *, check_only=False, connect=None, password=None):
                 report = {'status': 'TERADATA_CHECK_SUCCESS' if check_only else 'TERADATA_LOAD_SUCCESS',
                           'table': TABLE, 'host': HOST, 'rows': total, 'source_sha256': digest,
                           'source_product_run_id': summary.get('product_run_id'), 'columns': COLUMNS,
+                          'session_charset': 'UTF8', 'unicode_pass_through_requested': True, 'unicode_pass_through_enabled': not check_only, 'unicode_audit': unicode_audit,
                           'batch_size': BATCH_SIZE, 'mode': 'full_snapshot_replace',
                           'timestamp': datetime.now(timezone.utc).isoformat()}
             except Exception as error:
