@@ -2,6 +2,7 @@ import csv
 import json
 import sqlite3
 import zipfile
+from contextlib import closing
 
 import pyarrow.parquet as pq
 import pytest
@@ -60,7 +61,7 @@ def test_output_mapping_preserves_keys_boundaries_and_update_state(collection):
     profile_path=root/config['export_profile']
     profile=json.loads(profile_path.read_text());profile['fields'].remove('REGION_NAME_EDW');write_json(profile_path,profile)
     boundary=(root/'boundaries/regions.json').read_bytes()
-    with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
+    with closing(sqlite3.connect(root/'result/.state/registry.sqlite')) as db:
         before=db.execute('SELECT osm_type,osm_id,region_name,fingerprint,first_seen_date FROM poi ORDER BY osm_type,osm_id,tag').fetchall()
     report=execute(root,'files')
     assert report['region_mapping']['mapped_objects']==3
@@ -77,7 +78,7 @@ def test_output_mapping_preserves_keys_boundaries_and_update_state(collection):
     assert len({r['file'] for r in index})==len(index)
     assert all(row['REGION_NAME_EDW']=='Один филиал' for entry in index for row in csv_rows(root/'result'/entry['file']))
     assert (root/'boundaries/regions.json').read_bytes()==boundary
-    with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
+    with closing(sqlite3.connect(root/'result/.state/registry.sqlite')) as db:
         assert db.execute('SELECT osm_type,osm_id,region_name,fingerprint,first_seen_date FROM poi ORDER BY osm_type,osm_id,tag').fetchall()==before
     assert json.loads((root/'result/.state/last_success.json').read_text())['contract_hash']==original['contract_hash']
     with zipfile.ZipFile(root/'result/poi_layers.zip') as archive:

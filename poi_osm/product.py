@@ -12,6 +12,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import time
 import uuid
 import zipfile
 from contextlib import ExitStack, closing
@@ -167,7 +168,7 @@ def recover_swap(root):
     doc=read(journal); backup=Path(doc['backup'])
     if not backup.resolve().is_relative_to(root/'.work'): raise ValueError('Invalid publication journal')
     current=root/'result'
-    if not current.exists() and backup.exists(): backup.replace(current)
+    if not current.exists() and backup.exists(): move_result(backup, current)
     elif current.exists() and backup.exists():
         if read(current/'analysis/summary.json').get('product_run_id')!=doc['run_id']:
             raise ValueError('Publication needs recovery; previous registry kept in '+str(backup))
@@ -175,14 +176,46 @@ def recover_swap(root):
     journal.unlink()
 
 
+def move_result(source, destination):
+    """Retry transient Windows sharing failures without copying over live data."""
+    for attempt in range(4):
+        try:
+            return source.replace(destination)
+        except OSError as error:
+            if getattr(error, 'winerror', None) not in {5, 32, 33} or attempt == 3:
+                raise
+            time.sleep(0.25 * (attempt + 1))
+
+
+def check_publish_access(root, work, run_id):
+    current = root/'result'
+    if not current.exists():
+        return
+    probe = work/'publication-probe'
+    journal = root/'.swap.json'
+    atomic_json(journal, {'run_id':run_id, 'backup':str(probe)})
+    try:
+        move_result(current, probe)
+        move_result(probe, current)
+    except BaseException:
+        if probe.exists() and not current.exists():
+            move_result(probe, current)
+        if not probe.exists():
+            journal.unlink(missing_ok=True)
+        LOG.error('Cannot rename the result directory before generation. Check file locks and Windows permissions: %s', current)
+        raise
+    journal.unlink()
+    LOG.info('Result directory rename check passed')
+
+
 def publish(bundle, root, work, run_id):
     current=root/'result'; backup=work/'previous-result'
     atomic_json(root/'.swap.json',{'run_id':run_id,'backup':str(backup)})
     try:
-        if current.exists(): current.replace(backup)
-        bundle.replace(current)
+        if current.exists(): move_result(current, backup)
+        move_result(bundle, current)
     except BaseException:
-        if backup.exists(): backup.replace(current)
+        if backup.exists(): move_result(backup, current)
         (root/'.swap.json').unlink(missing_ok=True)
         raise
     if backup.exists(): remove_owned(backup,root)
@@ -323,6 +356,20 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     return bundle,report
 
 
+def render_in_child(registry, manifest, root, work, config, run_id, review, reuse):
+    job = work/'render-job.json'
+    atomic_json(job, {'registry':str(registry), 'manifest':manifest, 'root':str(root),
+                     'work':str(work), 'config':config, 'run_id':run_id,
+                     'review':str(review) if review else None, 'reuse':str(reuse) if reuse else None})
+    result = run_logged_child([sys.executable, '-m', 'poi_osm.render_worker', str(job)],
+                              work/'render-result.json', work, 'Export')
+    bundle = Path(result['bundle'])
+    if bundle.resolve() != (work/'bundle').resolve():
+        raise ValueError('Unexpected export child output path')
+    LOG.info('Export process exited; native file handles released before publication')
+    return bundle, result['report']
+
+
 def run_collection(root, work, config):
     transient=work/'collection';(transient/'state').mkdir(parents=True)
     previous=root/'result/.state/last_success.json'
@@ -330,7 +377,11 @@ def run_collection(root, work, config):
     args=[sys.executable,'-m','poi_osm.collection',config['input_folder'],'--output',str(transient),
           '--config',str(root/config['settings']),'--profile',str(root/config['collection_profile']),'--production','--registry-only']
     LOG.info('Extracting the current PBF snapshot; temporary caches will be removed after completion')
-    with (work/'collection-result.json').open('w',encoding='utf-8') as saved:
+    return run_logged_child(args,work/'collection-result.json',work,'Collection')
+
+
+def run_logged_child(args, result_path, work, label):
+    with result_path.open('w',encoding='utf-8') as saved:
         process=subprocess.Popen(args,cwd=REPO,stdout=saved,stderr=subprocess.PIPE,text=True,encoding='utf-8',
                                  start_new_session=os.name!='nt',creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name=='nt' else 0)
         marker=read(work/'owner.json');marker['child_pid']=process.pid;atomic_json(work/'owner.json',marker)
@@ -338,7 +389,7 @@ def run_collection(root, work, config):
             for line in process.stderr:
                 LOG.info('%s',line.rstrip().split(' | ',2)[-1])
             code=process.wait()
-            if code: raise RuntimeError(f'Collection failed with exit code {code}; see product log')
+            if code: raise RuntimeError(f'{label} failed with exit code {code}; see product log')
         except BaseException:
             if process.poll() is None:
                 if os.name=='nt': process.send_signal(signal.CTRL_BREAK_EVENT)
@@ -349,8 +400,11 @@ def run_collection(root, work, config):
                     else: os.killpg(process.pid,signal.SIGKILL)
                     process.wait()
             raise
-        finally: process.stderr.close()
-    return read(work/'collection-result.json')
+        finally:
+            process.stderr.close()
+            if process.poll() is not None:
+                marker['child_pid']=None;atomic_json(work/'owner.json',marker)
+    return read(result_path)
 
 
 def alive(pid):
@@ -447,6 +501,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 if not (root/'product.json').exists(): raise ValueError('First use --adopt with the existing reviewed production result')
                 config=read(root/'product.json')
                 logs_limit=validate_product(root,config)
+                check_publish_access(root,work,run_id)
                 if action=='files':
                     if not (root/'result/.state/last_success.json').exists():
                         raise ValueError('No saved registry yet; run without --files first')
@@ -456,7 +511,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                     manifest=run_collection(root,work,config);registry=Path(manifest['registry'])
                     review=Path(manifest['output'])/'review.csv';reuse=None
             logs_limit=validate_product(root,config)
-            bundle,report=render(registry,manifest,root,work,config,run_id,review,reuse)
+            bundle,report=render_in_child(registry,manifest,root,work,config,run_id,review,reuse)
             publish(bundle,root,work,run_id)
             legacy_locks.close()
             cleanup=cleanup_legacy(root,manifest)
@@ -475,7 +530,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
         finally:
             legacy_locks.close()
             # A failed rollback journal protects the only surviving registry.
-            if not (root/'.swap.json').exists() and work.exists(): remove_owned(work,root)
+            if not (root/'.swap.json').exists() and work.exists() and not alive(read(work/'owner.json').get('child_pid')): remove_owned(work,root)
             if report and (root/'result/analysis/summary.json').exists() and read(root/'result/analysis/summary.json').get('product_run_id')==run_id:
                 report['temporary_files_removed']=not work.exists()
                 if (root/'.swap.json').exists(): report['cleanup_complete']=False

@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,13 @@ from helpers import configure, part, run_collection, write_json
 from poi_osm import __version__
 from poi_osm.classification import CONFIG
 from poi_osm.kml import build as build_kml
-from poi_osm.product import execute, publish, recover_swap, remove_owned
+from poi_osm.product import (
+    check_publish_access,
+    execute,
+    publish,
+    recover_swap,
+    remove_owned,
+)
 
 
 @pytest.fixture
@@ -23,14 +30,14 @@ def legacy(collection):
     return collection,root,first
 
 
-def test_adopt_cleans_legacy_and_keeps_latest_files_and_registry(legacy,monkeypatch):
+def test_adopt_cleans_legacy_and_keeps_latest_files_and_registry(legacy):
     collection,root,first=legacy
     (root/'personal.txt').write_text('keep this')
     original=(collection/'inputs/alpha-261108.osm.pbf').read_bytes()
     # Existing ZIP is reused, not recalculated.
-    monkeypatch.setattr('poi_osm.product.build_kml',lambda *a,**k:pytest.fail('should reuse existing KML ZIP'))
     report=execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
     assert report['status']=='PRODUCT_SUCCESS'
+    assert 'Reusing the verified KML archive' in (root/'logs'/f"product-{report['product_run_id']}.log").read_text(encoding='utf-8')
     assert report['total_objects']==3
     assert report['cleanup']['skipped']==[]
     assert (root/'result/poi_teradata.csv').is_file()
@@ -49,7 +56,7 @@ def test_adopt_cleans_legacy_and_keeps_latest_files_and_registry(legacy,monkeypa
         info=json.loads(archive.read('summary.json'))
         assert info['archive']==str(root/'result/poi_layers.zip')
         assert info['source_run']==str(root/'result/.state/registry.sqlite')
-    with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
+    with closing(sqlite3.connect(root/'result/.state/registry.sqlite')) as db:
         assert db.execute('SELECT COUNT(*) FROM poi').fetchone()[0]==3
         assert not db.execute("SELECT name FROM sqlite_master WHERE name='overlap_objects'").fetchone()
 
@@ -57,10 +64,11 @@ def test_adopt_cleans_legacy_and_keeps_latest_files_and_registry(legacy,monkeypa
 def test_next_snapshot_compares_saved_registry_and_leaves_no_work(legacy):
     collection,root,first=legacy
     execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
-    with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
+    with closing(sqlite3.connect(root/'result/.state/registry.sqlite')) as db:
         db.execute("UPDATE poi SET first_seen_date='2020-01-01'")
+        db.commit()
     report=execute(root,'run')
-    with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
+    with closing(sqlite3.connect(root/'result/.state/registry.sqlite')) as db:
         assert db.execute('SELECT DISTINCT first_seen_date FROM poi').fetchall()==[('2020-01-01',)]
     assert report['status']=='PRODUCT_SUCCESS'
     assert report['metrics']['changes']=={'UNCHANGED':3}
@@ -71,13 +79,14 @@ def test_next_snapshot_compares_saved_registry_and_leaves_no_work(legacy):
     assert state['registry']==str(root/'result/.state/registry.sqlite')
 
 
-def test_render_failure_preserves_previous_result_and_deletes_work(legacy,monkeypatch):
+def test_render_failure_preserves_previous_result_and_deletes_work(legacy):
     collection,root,first=legacy
     execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
     before=(root/'result/poi_teradata.csv').read_bytes()
     registry=(root/'result/.state/registry.sqlite').read_bytes()
-    monkeypatch.setattr('poi_osm.product.export_warehouse',lambda *a,**k:(_ for _ in ()).throw(ValueError('test export failure')))
-    with pytest.raises(ValueError,match='test export failure'):execute(root,'files')
+    profile_path=root/'config/teradata_export.json'
+    profile=json.loads(profile_path.read_text());profile['osm_id_format']='invalid';write_json(profile_path,profile)
+    with pytest.raises(RuntimeError,match='Export failed'):execute(root,'files')
     assert (root/'result/poi_teradata.csv').read_bytes()==before
     assert (root/'result/.state/registry.sqlite').read_bytes()==registry
     assert not (root/'.work').exists()
@@ -125,7 +134,7 @@ def test_deletions_keep_tombstones_after_all_caches_are_cleaned(legacy):
     report=execute(root,'run')
     assert report['total_objects']==2
     assert report['metrics']['changes']=={'DELETED':1,'UNCHANGED':2}
-    with sqlite3.connect(root/'result/.state/registry.sqlite') as db:
+    with closing(sqlite3.connect(root/'result/.state/registry.sqlite')) as db:
         assert db.execute("SELECT record_status FROM poi WHERE osm_id='2'").fetchone()[0]=='DELETED'
     assert not (root/'.work').exists()
 
@@ -238,3 +247,67 @@ def test_quality_failure_keeps_current_result_after_refactor(legacy):
     with pytest.raises(RuntimeError,match='Collection failed'):execute(root,'run')
     assert (root/'result/.state/registry.sqlite').read_bytes()==saved
     assert not (root/'.work').exists()
+
+
+def test_publication_preflight_denial_keeps_current_without_running_export(tmp_path,monkeypatch):
+    root=tmp_path/'output';current=root/'result';current.mkdir(parents=True)
+    (current/'registry.sqlite').write_bytes(b'previous registry')
+    work=root/'.work/job';work.mkdir(parents=True)
+    original=Path.replace
+
+    def denied(self,target):
+        if self==current:
+            error=PermissionError('simulated Windows deny rename');error.winerror=5;raise error
+        return original(self,target)
+
+    monkeypatch.setattr(Path,'replace',denied)
+    monkeypatch.setattr('poi_osm.product.time.sleep',lambda seconds:None)
+    with pytest.raises(PermissionError,match='deny rename'):
+        check_publish_access(root,work,'job')
+    assert (current/'registry.sqlite').read_bytes()==b'previous registry'
+    assert not (root/'.swap.json').exists()
+    assert not (work/'publication-probe').exists()
+
+
+def test_publication_preflight_restores_directory_and_retries_transient_denial(tmp_path,monkeypatch):
+    root=tmp_path/'output';current=root/'result';current.mkdir(parents=True)
+    (current/'registry.sqlite').write_bytes(b'previous registry')
+    work=root/'.work/job';work.mkdir(parents=True)
+    original=Path.replace
+    calls=[]
+
+    def busy_once(self,target):
+        if self==current:
+            calls.append(1)
+            if len(calls)==1:
+                error=PermissionError('transient scanner lock');error.winerror=32;raise error
+        return original(self,target)
+
+    monkeypatch.setattr(Path,'replace',busy_once)
+    monkeypatch.setattr('poi_osm.product.time.sleep',lambda seconds:None)
+    check_publish_access(root,work,'job')
+    assert len(calls)==2
+    assert (current/'registry.sqlite').read_bytes()==b'previous registry'
+    assert not (root/'.swap.json').exists()
+
+
+def test_preflight_failed_restore_preserves_journal_for_next_start(tmp_path,monkeypatch):
+    root=tmp_path/'output';current=root/'result';current.mkdir(parents=True)
+    (current/'registry.sqlite').write_bytes(b'previous registry')
+    work=root/'.work/job';work.mkdir(parents=True)
+    original=Path.replace
+
+    def deny_restore(self,target):
+        if self.name=='publication-probe':
+            raise PermissionError('restore temporarily denied')
+        return original(self,target)
+
+    monkeypatch.setattr(Path,'replace',deny_restore)
+    with pytest.raises(PermissionError,match='restore temporarily denied'):
+        check_publish_access(root,work,'job')
+    assert (work/'publication-probe/registry.sqlite').read_bytes()==b'previous registry'
+    assert (root/'.swap.json').exists()
+    monkeypatch.setattr(Path,'replace',original)
+    recover_swap(root)
+    assert (current/'registry.sqlite').read_bytes()==b'previous registry'
+    assert not (root/'.swap.json').exists()

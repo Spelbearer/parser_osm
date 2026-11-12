@@ -1,2 +1,2 @@
 """OSM POI production exports and KML density layers."""
-__version__ = "0.9.0rc5"
+__version__ = "0.9.0rc6"

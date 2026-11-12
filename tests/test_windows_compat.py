@@ -44,3 +44,47 @@ def test_cleanup_does_not_suppress_real_permission_errors(tmp_path,monkeypatch):
     monkeypatch.setattr(Path,'unlink',denied)
     with pytest.raises(PermissionError,match='Access denied'):
         cleanup_index(tmp_path/'example.idx')
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows native file sharing semantics')
+def test_export_child_exit_releases_native_handle_before_publication(collection,tmp_path,monkeypatch):
+    from helpers import confirm_collection, run_collection
+
+    from poi_osm.product import alive, execute
+    confirm_collection(collection)
+    run_collection(collection,'--production')
+    root=collection/'results'
+    execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
+    hooks=tmp_path/'export-hooks';hooks.mkdir()
+    (hooks/'sitecustomize.py').write_text('''
+import ctypes
+import json
+import os
+from ctypes import wintypes
+from pathlib import Path
+import poi_osm.product as product
+original = product.render
+
+def render(*args, **kwargs):
+    result = original(*args, **kwargs)
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    handle = kernel.CreateFileW(str(kwargs['registry']), 0x80000000, 3, None, 3, 0, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    # Deliberately leave the handle without FILE_SHARE_DELETE open until process exit.
+    Path(__file__).with_name('native-handle.json').write_text(json.dumps({'pid':os.getpid()}))
+    return result
+
+product.render = render
+''',encoding='utf-8')
+    repo=Path(__file__).resolve().parents[1]
+    monkeypatch.setenv('PYTHONPATH',os.pathsep.join([str(hooks),str(repo)]))
+    report=execute(root,'files')
+    child=json.loads((hooks/'native-handle.json').read_text())
+    assert not alive(child['pid'])
+    assert report['status']=='PRODUCT_SUCCESS'
+    assert (root/'result/.state/registry.sqlite').is_file()
+    assert not (root/'.work').exists()

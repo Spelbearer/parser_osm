@@ -1,4 +1,4 @@
-# POI OSM 0.9.0rc5
+# POI OSM 0.9.0rc6
 
 Кандидат выпуска: сборка POI, актуализация, очистка, CSV/Parquet, KML ZIP и загрузка полного снимка в Teradata.
 
