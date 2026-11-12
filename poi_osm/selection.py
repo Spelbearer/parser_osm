@@ -64,4 +64,8 @@ class PrimarySelector:
         selected = next(r for r in json.loads(enriched["classifications"])
                         if r["tag"] == enriched["primary_tag"] and r.get("osm_key") == enriched["primary_osm_key"])
         result.update(telecom_type=selected.get("telecom_type"), telecom_evidence=selected.get("telecom_evidence"))
+        # Display-only cleanup preserves classification fingerprints and data contracts.
+        for field in ('telecom_type', 'primary_subcategory'):
+            if isinstance(result[field], str):
+                result[field] = result[field].replace(' (косвенная связь)', '')
         return result

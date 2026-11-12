@@ -76,6 +76,10 @@ class Registry:
             match = "o.osm_type=poi.osm_type AND o.osm_id=poi.osm_id AND o.tag=poi.tag"
             self.db.execute(f"""UPDATE poi SET
                 first_seen_date=COALESCE((SELECT o.first_seen_date FROM old.poi o WHERE {match}),first_seen_date),
+                update_date=CASE
+                  WHEN EXISTS(SELECT 1 FROM old.poi o WHERE {match} AND o.record_status!='DELETED' AND o.fingerprint=poi.fingerprint)
+                  THEN COALESCE((SELECT o.update_date FROM old.poi o WHERE {match}),update_date)
+                  ELSE update_date END,
                 record_status=CASE
                   WHEN NOT EXISTS(SELECT 1 FROM old.poi o WHERE {match} AND o.record_status!='DELETED') THEN 'NEW'
                   WHEN fingerprint=(SELECT o.fingerprint FROM old.poi o WHERE {match}) THEN 'UNCHANGED'
@@ -85,12 +89,15 @@ class Registry:
                 WHERE o.record_status!='DELETED' AND NOT EXISTS
                 (SELECT 1 FROM poi p WHERE p.osm_type=o.osm_type AND p.osm_id=o.osm_id AND p.tag=o.tag)""")
             columns = ",".join(FIELDS + ["fingerprint"])
-            selected = ",".join("?" if k == "update_date" else "'DELETED'" if k == "record_status" else f"o.{k}"
+            selected = ",".join("CASE WHEN o.record_status='DELETED' THEN o.update_date ELSE ? END" if k == "update_date" else "'DELETED'" if k == "record_status" else f"o.{k}"
                                 for k in FIELDS + ["fingerprint"])
             self.db.execute(f"""INSERT INTO poi({columns}) SELECT {selected} FROM old.poi o WHERE NOT EXISTS
                 (SELECT 1 FROM poi p WHERE p.osm_type=o.osm_type AND p.osm_id=o.osm_id AND p.tag=o.tag)""", (self.date,))
         else:
             self.db.execute("INSERT INTO changes SELECT osm_type,osm_id,tag,'NEW' FROM poi")
+        # Date describes the whole point, including adding/removing an assignment.
+        self.db.execute("""UPDATE poi SET update_date=? WHERE record_status!='DELETED'
+            AND EXISTS(SELECT 1 FROM changes c WHERE c.osm_type=poi.osm_type AND c.osm_id=poi.osm_id)""", (self.date,))
         self.db.commit()
 
     def metrics(self) -> dict:

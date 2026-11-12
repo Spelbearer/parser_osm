@@ -51,10 +51,16 @@ def object_rows(db):
     if not {"osm_type", "osm_id", "tag", "lon", "lat", "wkt", "record_status"} <= columns:
         raise ValueError("Input is not a compatible POI registry")
     selection = ",".join(k if k in columns else "NULL AS " + k for k in FIELDS)
-    cursor = db.execute(f"SELECT {selection} FROM poi WHERE record_status!='DELETED' ORDER BY osm_type,osm_id,tag")
-    rows = (dict(zip(FIELDS, row)) for row in cursor)
+    has_changes = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='changes'").fetchone()
+    removed = "EXISTS(SELECT 1 FROM changes c WHERE c.osm_type=poi.osm_type AND c.osm_id=poi.osm_id AND c.status='DELETED')" if has_changes else "0"
+    cursor = db.execute(f"SELECT {selection},{removed} FROM poi WHERE record_status!='DELETED' ORDER BY osm_type,osm_id,tag")
+    rows = (dict(zip([*FIELDS, "_removed_assignment"], row)) for row in cursor)
     for _, group in groupby(rows, key=lambda r: (r["osm_type"], r["osm_id"])):
-        yield collapse(group)
+        result = collapse(group)
+        # A surviving point also changes when one of its categories disappears.
+        if result.pop('_removed_assignment', False):
+            result['record_status'] = 'UPDATED'
+        yield result
 
 
 def export_objects(db, output: Path, *, parquet=True, batch_size=5000, selection_rules=None):
