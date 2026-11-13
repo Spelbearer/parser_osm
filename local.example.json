@@ -11,6 +11,16 @@
   "publication": {
     "enabled": false,
     "directory": "\\\\corp.tele2.ru\\operations_MR\\Operations_All\\Потенциал_рынка",
-    "region_column": "EDW"
+    "region_column": "EDW",
+    "name_overrides": {
+      "RU-MOW": "Москва",
+      "RU-MOS": "Московская область",
+      "RU-SPE": "Санкт-Петербург",
+      "RU-LEN": "Ленинградская область",
+      "RU-KK": "Хакасия",
+      "RU-TY": "Тыва",
+      "RU-KDA": "Краснодарский край",
+      "RU-AD": "Адыгея"
+    }
   }
 }

@@ -23,6 +23,12 @@ DEFAULT_DIRECTORY = r'\\corp.tele2.ru\operations_MR\Operations_All\Потенц�
 PREFIX = 'Данные_из_OSM_по_интересующим_тегам_Выгрузка_на_'
 MOSCOW = timezone(timedelta(hours=3))
 LOG = logging.getLogger(__name__)
+DEFAULT_NAME_OVERRIDES = {
+    'RU-MOW':'Москва', 'RU-MOS':'Московская область',
+    'RU-SPE':'Санкт-Петербург', 'RU-LEN':'Ленинградская область',
+    'RU-KK':'Хакасия', 'RU-TY':'Тыва',
+    'RU-KDA':'Краснодарский край', 'RU-AD':'Адыгея',
+}
 
 
 def settings(value=None, base=None):
@@ -35,7 +41,12 @@ def settings(value=None, base=None):
     if column not in {'EDW','CEM','REGION_NAME_POI'}: raise ValueError('Invalid publication.region_column')
     if not Path(directory).is_absolute() and not PureWindowsPath(directory).is_absolute() and base:
         directory = str(Path(base)/directory)
-    return {**value,'enabled':value.get('enabled',False),'directory':directory,'region_column':column}
+    overrides=value.get('name_overrides',{})
+    if not isinstance(overrides,dict) or any(not isinstance(code,str) or not re.fullmatch(r'[A-Z0-9-]+',code)
+            or not isinstance(label,str) or not label.strip() for code,label in overrides.items()):
+        raise ValueError('publication.name_overrides must map region codes to nonempty names')
+    overrides={**DEFAULT_NAME_OVERRIDES,**{code:label.strip() for code,label in overrides.items()}}
+    return {**value,'enabled':value.get('enabled',False),'directory':directory,'region_column':column,'name_overrides':overrides}
 
 
 def slug(value):
@@ -72,7 +83,7 @@ def rename_document(incoming,outgoing,title):
     return features
 
 
-def package(source,target,dictionary,column,product_run_id,source_date=None):
+def package(source,target,dictionary,column,product_run_id,source_date=None,name_overrides=None):
     with zipfile.ZipFile(source) as original:
         if original.testzip() is not None: raise ValueError('Source KML ZIP is corrupt')
         report=json.loads(original.read('summary.json'))
@@ -86,7 +97,7 @@ def package(source,target,dictionary,column,product_run_id,source_date=None):
             record=dictionary.records.get(entry['region_code'])
             if not record: raise ValueError('Missing region dictionary record: '+entry['region_code'])
             macro=record.get('MACROREGION_NAME')
-            region=record.get(column)
+            region=(name_overrides or {}).get(entry['region_code']) or record.get(column)
             if not macro or not region: raise ValueError('Missing macroregion/region label: '+entry['region_code'])
             planned.append({**entry,'macroregion':macro,'label':region,'base':slug(macro)+'_('+slug(region)+')'})
         codes={entry['base']:{e['region_code'] for e in planned if e['base']==entry['base']} for entry in planned}
@@ -106,7 +117,7 @@ def package(source,target,dictionary,column,product_run_id,source_date=None):
                               'macroregion':entry['macroregion'],'circles':count})
             packaged={'status':'KML_SHARE_PACKAGE','source_product_run_id':product_run_id,
                       'source_date':source_date,'source_zip_sha256':_hash_file(source),'region_column':column,
-                      'dictionary_sha256':dictionary.metadata['dictionary_sha256'],'files':files,
+                      'dictionary_sha256':dictionary.metadata['dictionary_sha256'],'name_overrides':name_overrides or {},'files':files,
                       'circles':sum(entry['circles'] for entry in files),'license':report.get('license','ODbL-1.0; © OpenStreetMap contributors')}
     with zipfile.ZipFile(target) as archive:
         if archive.testzip() is not None or set(archive.namelist())!={entry['file'] for entry in files}:
@@ -136,7 +147,7 @@ def publish_layers(root,options,*,now=None):
             stamp=published_at.strftime('%Y_%m_%d')
             filename=PREFIX+stamp+'_с_poi.zip'
             named=work/filename
-            packaged=package(source,named,dictionary,options['region_column'],summary.get('product_run_id'),summary.get('source_date'))
+            packaged=package(source,named,dictionary,options['region_column'],summary.get('product_run_id'),summary.get('source_date'),options['name_overrides'])
             directory=Path(destination)
             if directory.resolve().is_relative_to(root/'result') or directory.resolve().is_relative_to(root/'.work'):
                 raise ValueError('Publication destination must be outside generated result/work directories')
