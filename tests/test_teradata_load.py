@@ -1,5 +1,6 @@
 import csv
 import json
+import sqlite3
 from datetime import date
 from decimal import Decimal
 
@@ -12,7 +13,7 @@ from poi_osm.teradata_load import (
     convert,
     execute,
     password_for,
-    replace_snapshot,
+    sync_snapshot,
     validate,
 )
 
@@ -33,56 +34,62 @@ def save(path, records):
 
 
 class Cursor:
-    def __init__(self, con):
-        self.con = con
-        self.description = [(c,) for c in COLUMNS]
-        self.result = (0,)
+    def __init__(self,con):
+        self.con=con
+        self.description=[(c,) for c in COLUMNS]
+        self.raw=con.db.cursor()
+        self.closed=False
+        self.result=None
 
-    def execute(self, sql):
+    def execute(self,sql):
         self.con.statements.append(sql)
-        if sql.startswith('DELETE'):
-            self.con.pending = []
-        elif 'COUNT(DISTINCT' in sql:
-            self.result = (len(self.con.pending), len({r[2] for r in self.con.pending}))
-            if self.con.wrong_count:
-                self.result = (0, 0)
+        self.result=None
+        if sql.startswith('SET SESSION'): return
+        sql=sql.replace('LOCKING TABLE '+self.con.table+' FOR WRITE ','')
+        self.raw.execute(sql.replace(self.con.table,'target'))
+        if 'COUNT(DISTINCT' in sql and self.con.wrong_count: self.result=(0,0)
 
-    def executemany(self, sql, rows):
+    def executemany(self,sql,rows):
+        self.con.statements.append(sql)
         self.con.batch_sizes.append(len(rows))
-        if self.con.fail_insert:
-            raise RuntimeError('driver error password=p@ss')
-        self.con.pending.extend(rows)
+        if self.con.fail_insert: raise RuntimeError('driver error password=p@ss')
+        clean=lambda value:str(value) if isinstance(value,(Decimal,date)) else value
+        self.raw.executemany(sql.replace(self.con.table,'target'),[tuple(clean(v) for v in row) for row in rows])
 
     def fetchone(self):
-        return self.result
+        return self.result if self.result is not None else self.raw.fetchone()
+
+    def fetchmany(self,size):
+        return self.raw.fetchmany(size)
 
     def close(self):
-        pass
+        self.raw.close();self.closed=True
 
 
 class Connection:
-    def __init__(self, *, fail_insert=False, wrong_count=False):
-        self.pending = [('old',)]
-        self.committed = 0
-        self.rolled_back = 0
-        self.closed = False
-        self.statements = []
-        self.batch_sizes = []
-        self.fail_insert = fail_insert
-        self.wrong_count = wrong_count
-        self.cur = Cursor(self)
+    table='SBX_OPERATION.DAK_POI_ISH'
+    def __init__(self,*,fail_insert=False,wrong_count=False,initial=()):
+        self.db=sqlite3.connect(':memory:')
+        self.db.execute('CREATE TABLE target('+','.join('"'+c+'" '+('INTEGER' if c in {'OSM_ID','IS_TELECOM'} else 'TEXT') for c in COLUMNS)+')')
+        for values in initial:
+            self.db.execute('INSERT INTO target VALUES('+','.join('?' for _ in COLUMNS)+')',
+                            [str(v) if isinstance(v,(Decimal,date)) else v for v in values])
+        self.db.commit()
+        self.committed=0;self.rolled_back=0;self.closed=False
+        self.statements=[];self.batch_sizes=[]
+        self.fail_insert=fail_insert;self.wrong_count=wrong_count
+        self.cur=Cursor(self)
+
+    @property
+    def pending(self):
+        return self.db.execute('SELECT * FROM target ORDER BY OSM_ID').fetchall()
 
     def cursor(self):
+        if self.cur.closed: self.cur=Cursor(self)
         return self.cur
-
-    def commit(self):
-        self.committed += 1
-
-    def rollback(self):
-        self.rolled_back += 1
-
-    def close(self):
-        self.closed = True
+    def commit(self): self.db.commit();self.committed+=1
+    def rollback(self): self.db.rollback();self.rolled_back+=1
+    def close(self): self.closed=True
 
 
 def test_conversion_matches_target_ddl():
@@ -99,7 +106,7 @@ def test_conversion_matches_target_ddl():
 
 @pytest.mark.parametrize('changes', [dict(point_name='я'*256), dict(point_name='😀'*128),
     dict(osm_id='9223372036854775808'), dict(osm_type='relation'), dict(lat='NaN'),
-    dict(lon='181'), dict(is_chain='yes'), dict(update_date='2026-02-30')])
+    dict(lon='181'), dict(is_chain='yes'), dict(update_date='2026-02-30'), dict(record_status='DELETED')])
 def test_invalid_values_are_rejected(changes):
     with pytest.raises(ValueError):
         convert(row(**changes))
@@ -125,12 +132,12 @@ def test_single_transaction_batches_and_count_verification(tmp_path):
         options.update(kwargs)
         return con
 
-    replace_snapshot(source, 10001, connect=connect, password='p@ss')
+    sync_snapshot(source, 10001, connect=connect, password='p@ss')
     assert con.autocommit is False and options['logmech'] == 'LDAP' and options['tmode'] == 'ANSI'
     assert options['host'] == 'td2800.corp.tele2.ru'
     assert con.batch_sizes == [10000, 1]
     assert con.committed == 1 and con.rolled_back == 0 and con.closed
-    assert sum(sql.startswith('DELETE') for sql in con.statements) == 1
+    assert not any(sql.startswith('DELETE') for sql in con.statements)
 
 
 @pytest.mark.parametrize('failure', ['insert', 'count', 'schema'])
@@ -140,7 +147,7 @@ def test_failure_rolls_back_and_masks_password(tmp_path, failure):
     if failure == 'schema':
         con.cur.description = [('OSM_ID',)]
     with pytest.raises(RuntimeError) as error:
-        replace_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
+        sync_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
     assert 'p@ss' not in str(error.value)
     assert con.committed == 0 and con.rolled_back == 1 and con.closed
     if failure == 'schema':
@@ -186,7 +193,7 @@ def test_commit_failure_reports_uncertain_outcome(tmp_path):
 
     con.commit = fail_commit
     with pytest.raises(RuntimeError, match='COMMIT outcome unconfirmed'):
-        replace_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
+        sync_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
     assert con.rolled_back == 1 and con.closed
 
 
@@ -233,7 +240,7 @@ def test_extended_unicode_is_cleaned_only_in_upload_and_audited(tmp_path):
         options.update(kwargs)
         return con
 
-    replace_snapshot(prepared, 2, connect=connect, password='p@ss')
+    sync_snapshot(prepared, 2, connect=connect, password='p@ss')
     assert options['charset'] == 'UTF8'
     assert con.statements[0] == 'SET SESSION CHARACTER SET UNICODE PASS THROUGH ON'
     assert con.pending[0][COLUMNS.index('POINT_NAME')] == 'Ремонт телефонов'
@@ -252,7 +259,7 @@ def test_unicode_session_setup_failure_stops_before_delete(tmp_path):
 
     con.cur.execute = execute_sql
     with pytest.raises(RuntimeError, match='Unicode Pass Through not available'):
-        replace_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
+        sync_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
     assert not any(sql.startswith('DELETE') for sql in con.statements)
     assert con.rolled_back == 1 and con.committed == 0
 
@@ -268,8 +275,8 @@ def test_batch_diagnostics_are_read_before_rollback_and_masked(tmp_path):
 
     con.nativeSQL = native_sql
     with pytest.raises(RuntimeError) as error:
-        replace_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
-    assert 'Batch object rows 1-1' in str(error.value)
+        sync_snapshot(source, 1, connect=lambda **kw: con, password='p@ss')
+    assert 'NEW batch of 1 objects' in str(error.value)
     assert 'driver batch details: row 1: invalid character' in str(error.value)
     assert 'p@ss' not in str(error.value)
     assert con.rolled_back == 1
@@ -325,3 +332,86 @@ def test_execute_upload_uses_subcategory_for_emoji_only_name(tmp_path):
     assert report['unicode_audit']['point_name_fallbacks']==1
     assert report['prepared_csv_sha256']!=report['source_sha256']
     assert source.read_bytes()==saved
+
+
+def test_incremental_sync_writes_only_delta_and_handles_skipped_source_runs(tmp_path):
+    source=tmp_path/'poi.csv'
+    save(source,[row(osm_id='1',record_status='UNCHANGED'),
+                 row(osm_id='2',point_name='Новое имя',record_status='UNCHANGED'),
+                 row(osm_id='3',record_status='NEW'),row(osm_id='4',record_status='UNCHANGED')])
+    old=[convert(row(osm_id='1',record_status='NEW')),convert(row(osm_id='2',point_name='Старое имя')),
+         convert(row(osm_id='5'))]
+    con=Connection(initial=old)
+    report=sync_snapshot(source,4,connect=lambda **kw:con,password='p@ss',audit_path=tmp_path/'delta.csv')
+    assert report['changes']=={'NEW':2,'UPDATED':1,'DELETED':1,'UNCHANGED':1}
+    assert report['rows_sent']==4 and report['status_resets']==1 and report['target_before']==3 and report['target_after']==4
+    values={value[2]:dict(zip(COLUMNS,value)) for value in con.pending}
+    assert set(values)=={'way/1','way/2','way/3','way/4'}
+    assert values['way/1']['RECORD_STATUS']=='UNCHANGED'
+    assert values['way/2']['POINT_NAME']=='Новое имя' and values['way/2']['RECORD_STATUS']=='UPDATED'
+    assert values['way/4']['RECORD_STATUS']=='NEW'
+    assert all('WHERE "OSM_TYPE_ID" = ?' in sql for sql in con.statements if sql.startswith(('UPDATE','DELETE')) and 'SET "RECORD_STATUS"' not in sql)
+    with (tmp_path/'delta.csv').open(encoding='utf-8-sig',newline='') as stream:
+        audit={entry['osm_type_id']:entry for entry in csv.DictReader(stream,delimiter=';')}
+    assert audit['way/2']['source_record_status']=='UNCHANGED' and audit['way/2']['action']=='UPDATED'
+    assert 'way/1' not in audit
+    con.statements.clear();con.batch_sizes.clear()
+    again=sync_snapshot(source,4,connect=lambda **kw:con,password='p@ss')
+    assert again['changes']=={'NEW':0,'UPDATED':0,'DELETED':0,'UNCHANGED':4}
+    assert again['rows_sent']==0 and again['status_resets']==3
+    assert all("""SET "RECORD_STATUS" = 'UNCHANGED'""" in sql for sql in con.statements if sql.startswith('UPDATE'))
+    con.statements.clear();con.batch_sizes.clear()
+    third=sync_snapshot(source,4,connect=lambda **kw:con,password='p@ss')
+    assert third['rows_sent']==0 and not con.batch_sizes
+
+
+def test_incremental_failure_rolls_back_delete_and_update_when_insert_fails(tmp_path):
+    source=tmp_path/'poi.csv';save(source,[row(osm_id='1',point_name='Новое имя'),row(osm_id='3')])
+    con=Connection(initial=[convert(row(osm_id='1',record_status='NEW')),convert(row(osm_id='2',record_status='UPDATED'))])
+    before=con.pending
+    original=con.cur.executemany
+    def fail_insert(sql,values):
+        if sql.startswith('INSERT'):raise RuntimeError('insert failed')
+        return original(sql,values)
+    con.cur.executemany=fail_insert
+    with pytest.raises(RuntimeError,match='insert failed'):
+        sync_snapshot(source,2,connect=lambda **kw:con,password='p@ss')
+    assert con.pending==before
+    assert con.rolled_back==1 and con.committed==0
+    assert any(sql.startswith('DELETE') for sql in con.statements)
+    assert any(sql.startswith('UPDATE') for sql in con.statements)
+
+
+def test_duplicate_target_identity_is_rejected_before_dml(tmp_path):
+    source=tmp_path/'poi.csv';save(source,[row()])
+    values=convert(row())
+    con=Connection(initial=[values,values])
+    with pytest.raises(RuntimeError,match='Duplicate OSM_TYPE_ID in target'):
+        sync_snapshot(source,1,connect=lambda **kw:con,password='p@ss')
+    assert len(con.pending)==2 and con.rolled_back==1
+    assert not any(sql.startswith(('INSERT','UPDATE','DELETE')) for sql in con.statements)
+
+
+def test_category_change_keeps_object_and_ignores_status_only_transition(tmp_path):
+    source=tmp_path/'poi.csv';save(source,[row(primary_subcategory='Ремонт',record_status='UPDATED')])
+    con=Connection(initial=[convert(row(primary_subcategory='Электроника',record_status='NEW'))])
+    report=sync_snapshot(source,1,connect=lambda **kw:con,password='p@ss')
+    assert report['changes']=={'NEW':0,'UPDATED':1,'DELETED':0,'UNCHANGED':0}
+    assert con.pending[0][COLUMNS.index('PRIMARY_SUBCATEGORY')]=='Ремонт'
+    save(source,[row(primary_subcategory='Ремонт',record_status='UNCHANGED')])
+    report=sync_snapshot(source,1,connect=lambda **kw:con,password='p@ss')
+    assert report['changes']['UNCHANGED']==1 and report['rows_sent']==0 and report['status_resets']==1
+
+
+
+def test_status_only_reset_sends_no_records_and_preserves_change_date(tmp_path):
+    source=tmp_path/'poi.csv';save(source,[row(record_status='UNCHANGED')])
+    con=Connection(initial=[convert(row(record_status='NEW'))])
+    before=con.pending[0]
+    report=sync_snapshot(source,1,connect=lambda **kw:con,password='p@ss')
+    assert con.pending[0][:-1]==before[:-1]
+    assert con.pending[0][-1]=='UNCHANGED'
+    assert report['rows_sent']==0 and report['status_resets']==1 and report['unchanged_status_resets']==1
+    assert not con.batch_sizes
+    updates=[sql for sql in con.statements if sql.startswith('UPDATE')]
+    assert len(updates)==1 and updates[0].count(' = ')==1 and 'SET "RECORD_STATUS"' in updates[0]

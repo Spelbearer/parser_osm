@@ -582,7 +582,7 @@ def main(argv=None):
     group.add_argument('--make-portable',action='store_true',help='Copy rule dictionaries into the existing installation and store relative paths')
     group.add_argument('--init',action='store_true',help='Initialize a new installation using previously reviewed boundaries')
     group.add_argument('--adopt',action='store_true',help='Migrate a reviewed successful legacy result and remove recognised legacy artifacts')
-    group.add_argument('--load-teradata',action='store_true',help='Replace the Teradata table with the last verified POI snapshot')
+    group.add_argument('--load-teradata',action='store_true',help='Synchronize changed POIs with Teradata; reset unchanged status marks without uploading unchanged records')
     group.add_argument('--check-teradata',action='store_true',help='Validate the last snapshot against Teradata column limits without connecting')
     group.add_argument('--download',action='store_true',help='Download the agreed Geofabrik extracts temporarily, then build a fresh snapshot')
     group.add_argument('--files',action='store_true',help='Regenerate CSV/Parquet/KML from the saved registry, without PBF')
