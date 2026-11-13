@@ -49,6 +49,8 @@ def rename_document(incoming,outgoing,title):
     outgoing.write(f'<?xml version="1.0" encoding="UTF-8"?><kml xmlns="{NS}"><Document>'.encode())
     label=ET.Element('{'+NS+'}name');label.text=title
     outgoing.write(ET.tostring(label,encoding='utf-8'))
+    snippet=ET.Element('{'+NS+'}Snippet',maxLines='0')
+    outgoing.write(ET.tostring(snippet,encoding='utf-8'))
     attribution=ET.Element('{'+NS+'}description')
     attribution.text='© OpenStreetMap contributors; ODbL-1.0; https://www.openstreetmap.org/copyright'
     outgoing.write(ET.tostring(attribution,encoding='utf-8'))
@@ -61,7 +63,7 @@ def rename_document(incoming,outgoing,title):
                 document=node
         else:
             if depth==3:
-                if node.tag not in {'{'+NS+'}name','{'+NS+'}description'}: outgoing.write(ET.tostring(node,encoding='utf-8'))
+                if node.tag not in {'{'+NS+'}name','{'+NS+'}description','{'+NS+'}Snippet','{'+NS+'}snippet'}: outgoing.write(ET.tostring(node,encoding='utf-8'))
                 features+=node.tag=='{'+NS+'}Placemark'
                 document.remove(node);node.clear()
             depth-=1
