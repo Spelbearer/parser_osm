@@ -23,11 +23,12 @@ TABLE = 'SBX_OPERATION.DAK_POI_ISH'
 HOST = 'td2800.corp.tele2.ru'
 BATCH_SIZE = 10_000
 COLUMNS = ['OSM_TYPE', 'OSM_ID', 'OSM_TYPE_ID', 'POINT_NAME', 'LON', 'LAT', 'WKT',
-           'REGION_NAME', 'REGION_NAME_EDW', 'PRIMARY_CATEGORY', 'PRIMARY_SUBCATEGORY',
+           'REGION_NAME', 'REGION_NAME_EDW', 'CNT_CIRCLE', 'PRIMARY_CATEGORY', 'PRIMARY_SUBCATEGORY',
            'PRIMARY_OSM_KEY', 'PRIMARY_OSM_VALUE', 'IS_TELECOM', 'TELECOM_TYPE',
            'IS_CHAIN', 'CHAIN_NAME', 'UPDATE_DATE', 'RECORD_STATUS']
 SOURCE = {c: c.lower() for c in COLUMNS if c != 'OSM_TYPE_ID'}
 SOURCE['REGION_NAME_EDW'] = 'REGION_NAME_EDW'
+SOURCE['CNT_CIRCLE'] = 'CNT_CIRCLE'
 
 
 def convert(row):
@@ -37,6 +38,10 @@ def convert(row):
     kind, ident = values['OSM_TYPE'], values['OSM_ID']
     if kind not in {'node', 'way'} or not ident or not ident.isascii() or not ident.isdigit() or not 0 < int(ident) <= 9223372036854775807:
         raise ValueError('Invalid node/way BIGINT identity')
+    count=values['CNT_CIRCLE']
+    if not count or not count.isascii() or not count.isdigit() or not 0<=int(count)<=2147483647:
+        raise ValueError('CNT_CIRCLE must be a nonnegative INTEGER')
+    values['CNT_CIRCLE']=int(count)
     values['OSM_ID'] = int(ident)
     values['OSM_TYPE_ID'] = f'{kind}/{int(ident)}'
     for column, bound in [('LON', 180), ('LAT', 90)]:
@@ -167,7 +172,7 @@ def password_for(user):
 
 
 def encoded(values):
-    """Stable representation of the actual 19-column Teradata payload."""
+    """Stable representation of the actual 20-column Teradata payload."""
     normalized = list(values)
     for index,column in enumerate(COLUMNS):
         value = normalized[index]
@@ -175,7 +180,7 @@ def encoded(values):
             continue
         if column in {'LON','LAT'}:
             value = format(Decimal(value).quantize(Decimal('0.00001')) + Decimal(0), '.5f')
-        elif column in {'OSM_ID','IS_TELECOM'}:
+        elif column in {'OSM_ID','IS_TELECOM','CNT_CIRCLE'}:
             value = int(value)
         elif column == 'UPDATE_DATE':
             value = value.date().isoformat() if isinstance(value,datetime) else value.isoformat() if isinstance(value,date) else date.fromisoformat(str(value)).isoformat()

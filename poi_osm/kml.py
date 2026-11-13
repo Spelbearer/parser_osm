@@ -21,6 +21,8 @@ from pyproj import Geod
 from shapely import STRtree, points
 from shapely.geometry import Polygon, box
 
+from .circle_counts import FIELDS as CIRCLE_FIELDS
+from .circle_counts import circle_key
 from .classification import CONFIG
 from .geography import split_dateline
 from .runtime import atomic_json, configure_utf8
@@ -31,7 +33,7 @@ LOG = logging.getLogger(__name__)
 NS = 'http://www.opengis.net/kml/2.2'
 ET.register_namespace('',NS)
 GEOD = Geod(ellps='WGS84')
-RENDERER_VERSION = 3
+RENDERER_VERSION = 4
 POINT_ICON = 'http://maps.google.com/mapfiles/kml/paddle/ltblu-blank.png'
 LABELS = {'point_name':'Название','osm_type':'Тип OSM','osm_id':'ID OSM','address':'Адрес',
           'region_name':'Регион','region_code':'Код региона','primary_category':'Категория','primary_subcategory':'Подкатегория',
@@ -262,6 +264,16 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
             telecom[seq],chains[seq] = attributes.get('is_telecom')=='1',attributes.get('is_chain')=='1'
         tree = STRtree(points(lons,lats)) if count else None
         included = np.zeros(count,dtype=bool)
+        catalog_path=stage/'circles.csv'
+        catalog_stream=catalog_path.open('x',encoding='utf-8',newline='')
+        catalog_writer=csv.DictWriter(catalog_stream,fieldnames=CIRCLE_FIELDS,delimiter=';');catalog_writer.writeheader()
+        circle_keys=set()
+        def save_circle(lon,lat,radius):
+            key=circle_key(lon,lat,radius)
+            if key not in circle_keys:
+                circle_keys.add(key)
+                catalog_writer.writerow(dict(circle_id=key,lon=lon,lat=lat,radius_m=radius))
+
         if config['circle_mode']=='visit_zones':
             for zone in select_zones(db,tree,lons,lats,name_ids,telecom,chains,config,neighbors,GEOD,stats):
                 ids = zone.pop('members');representative = zone.pop('representative')
@@ -272,6 +284,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
                 title = f"Зона — {zone['poi_count']} точек, сети: {zone['chain_count']}, телефония: {zone['telecom_count']}"
                 layers.write('circles',code,placemark(title,data,circle(zone['center_lon'],zone['center_lat'],config['radius_m'],config['circle_vertices']),'circle'))
                 stats['circles'] += 1
+                save_circle(zone['center_lon'],zone['center_lat'],config['radius_m'])
         else:
             for seq,code,lon,lat in db.execute('SELECT MIN(seq),region,lon,lat FROM points GROUP BY region,lon,lat ORDER BY MIN(seq)'):
                 ids = neighbors(tree,lon,lat,lons,lats,config['radius_m'])
@@ -286,8 +299,11 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
                     feature = placemark(title,data,
                                         circle(lon,lat,config['radius_m'],config['circle_vertices']),'circle')
                     layers.write('circles',code,feature);stats['circles'] += 1
+                    save_circle(lon,lat,config['radius_m'])
                 if stats['candidate_centers'] % 5000==0: LOG.info('Checked %s circle centers; selected %s',stats['candidate_centers'],stats['circles'])
             stats['duplicate_centers_removed'] = count-stats['candidate_centers']
+        catalog_stream.close()
+        stats['unique_circles']=len(circle_keys)
         stats['points_in_selected_circles'] = int(included.sum())
         if config['export_points']:
             for seq,code,payload in db.execute('SELECT seq,region,payload FROM points ORDER BY seq'):
@@ -310,7 +326,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
             if seen!=file['features']: raise ValueError('KML feature count verification failed')
         if _hash_file(source)!=source_hash: raise ValueError('Source CSV changed during KML generation')
         report = {'status':'KML_EXPORT_SUCCESS','source_run':str(source_reference or run),'source_status':info['status'],
-                  'renderer_version':RENDERER_VERSION,'source_csv_sha256':source_hash,'output':str(destination),'archive':str(archive_path),
+                  'circle_catalog_sha256':_hash_file(catalog_path),'renderer_version':RENDERER_VERSION,'source_csv_sha256':source_hash,'output':str(destination),'archive':str(archive_path),
                   'config':config,'counts':dict(stats),'files':layers.files,'file_checks_ok':True,
                   'layers_kept':bool(keep_unpacked),'layer_paths':'ZIP entries',
                   'license':'ODbL-1.0; © OpenStreetMap contributors',
@@ -320,7 +336,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
             writer = csv.DictWriter(stream,fieldnames=['kind','region_code','region_name','file','features'],delimiter=';')
             writer.writeheader();writer.writerows(layers.files)
         temporary_zip = stage/'archive.zip.partial'
-        paths = [stage/f['file'] for f in layers.files]+[stage/'summary.json',stage/'regions_index.csv',stage/'config.json']
+        paths = [stage/f['file'] for f in layers.files]+[stage/'summary.json',stage/'regions_index.csv',stage/'config.json',catalog_path]
         with zipfile.ZipFile(temporary_zip,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=6,allowZip64=True) as archive:
             for path in paths: archive.write(path,path.relative_to(stage).as_posix())
         with zipfile.ZipFile(temporary_zip) as archive:
@@ -334,6 +350,7 @@ def build(run, output_root, config_path, *, keep_unpacked=False, source_referenc
         except OSError: pass
         return report
     except BaseException as error:
+        if 'catalog_stream' in locals(): catalog_stream.close()
         layers.close();db.close()
         atomic_json(output_root/'last_failure.json',{'status':'FAILED','error':str(error),'source_run':str(run)})
         if stage.exists(): shutil.rmtree(stage)

@@ -221,7 +221,7 @@ def test_fresh_installation_initializes_and_runs_without_legacy_tools(collection
     assert finished.returncode==0,finished.stderr
     result=json.loads((root/'result/analysis/summary.json').read_text())
     assert result['total_objects']==3 and result['version']==__version__
-    assert len(result['columns'])==18
+    assert len(result['columns'])==19
     assert not list(root.rglob('full')) and not list(root.rglob('delta'))
     assert not (root/'.work').exists()
 
@@ -311,3 +311,44 @@ def test_preflight_failed_restore_preserves_journal_for_next_start(tmp_path,monk
     recover_swap(root)
     assert (current/'registry.sqlite').read_bytes()==b'previous registry'
     assert not (root/'.swap.json').exists()
+
+
+def test_circle_counts_survive_projection_regional_files_and_archive_reuse(legacy):
+    import csv
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from helpers import csv_rows
+
+    from poi_osm.circle_counts import annotate
+    from poi_osm.kml import neighbors
+
+    collection,root,first=legacy
+    kml_config=json.loads((CONFIG/'kml.json').read_text())
+    kml_config['min_count']=1
+    write_json(root/'kml-counts.json',kml_config)
+    execute(root,'adopt',collection/'config/settings.json',collection/'profile.json')
+    product=json.loads((root/'product.json').read_text())
+    write_json(root/product['kml_config'],kml_config)
+    report=execute(root,'files')
+    result=root/'result'
+    rows=csv_rows(result/'poi_teradata.csv')
+    assert len(rows)==3 and all(int(row['CNT_CIRCLE'])>=1 for row in rows)
+    table=pq.read_table(result/'poi_teradata.parquet')
+    assert table.schema.field('CNT_CIRCLE').type==pa.int32()
+    assert table.column('CNT_CIRCLE').to_pylist()==[int(row['CNT_CIRCLE']) for row in rows]
+    with zipfile.ZipFile(result/'poi_layers.zip') as archive:
+        catalog=root/'catalog.csv';catalog.write_bytes(archive.read('circles.csv'))
+    # Independent replay against original coordinates must match the projected output.
+    raw=root/'raw.csv'
+    with raw.open('w',encoding='utf-8-sig',newline='') as stream:
+        writer=csv.DictWriter(stream,fieldnames=list(rows[0]),delimiter=';')
+        writer.writeheader();writer.writerows(rows)
+    replay=annotate(raw,catalog,neighbors)
+    assert replay['memberships']==report['circle_membership']['memberships']
+    assert [r['CNT_CIRCLE'] for r in csv_rows(raw)]==[r['CNT_CIRCLE'] for r in rows]
+    regional=[row for item in csv_rows(result/'analysis/regions_index.csv') for row in csv_rows(result/item['file'])]
+    assert sorted((r['osm_type'],r['osm_id'],r['CNT_CIRCLE']) for r in regional)==sorted((r['osm_type'],r['osm_id'],r['CNT_CIRCLE']) for r in rows)
+    again=execute(root,'files')
+    assert again['circle_membership']==report['circle_membership']
+    assert 'Reusing the verified KML archive' in (root/'logs'/f"product-{again['product_run_id']}.log").read_text(encoding='utf-8')

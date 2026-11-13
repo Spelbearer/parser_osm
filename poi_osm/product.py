@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import __version__
 from .audit import audit
+from .circle_counts import annotate as annotate_circles
 from .classification import CONFIG
 from .collection import inspect_sources, profile_from
 from .config import load_settings
@@ -33,6 +34,7 @@ from .installation import (
 )
 from .kml import RENDERER_VERSION as KML_RENDERER_VERSION
 from .kml import build as build_kml
+from .kml import neighbors as circle_neighbors
 from .kml import validate as validate_kml
 from .objects import export_objects
 from .region_dictionary import RegionDictionary
@@ -281,7 +283,7 @@ def copy_registry(source, destination):
 def repack(source, destination, report):
     with zipfile.ZipFile(source) as old:
         if old.testzip() is not None: raise ValueError('Source ZIP CRC check failed')
-        expected={f['file'] for f in report['files']}|{'summary.json','config.json','regions_index.csv'}
+        expected={f['file'] for f in report['files']}|{'summary.json','config.json','regions_index.csv','circles.csv'}
         if set(old.namelist())!=expected: raise ValueError('Unexpected ZIP contents')
         with zipfile.ZipFile(destination,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=6,allowZip64=True) as new:
             for name in old.namelist():
@@ -313,13 +315,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
     profile=read(root/config['export_profile'])
     if 'REGION_NAME_EDW' not in profile['fields']:
         profile['fields'].insert(profile['fields'].index('region_name')+1 if 'region_name' in profile['fields'] else len(profile['fields']), 'REGION_NAME_EDW')
-    atomic_json(work/'export_profile.json',profile)
-    warehouse,export=export_warehouse(source,work/'warehouse',work/'export_profile.json',region_dictionary=dictionary)
     bundle=work/'bundle';bundle.mkdir();(bundle/'analysis').mkdir();(bundle/'.state').mkdir()
-    for name in ['poi_teradata.csv','poi_teradata.parquet','regions']:
-        shutil.move(str(warehouse/name),str(bundle/name))
-    shutil.copyfile(warehouse/'regions_index.csv',bundle/'analysis/regions_index.csv')
-    shutil.copyfile(warehouse/'profile.json',bundle/'analysis/export_profile.json')
     dictionary.write_index(bundle/'analysis/region_mapping.csv',regions)
     if review and Path(review).is_file(): shutil.copyfile(review,bundle/'analysis/review.csv')
     checks['run']=str(root/'result/.state/registry.sqlite');atomic_json(bundle/'analysis/audit.json',checks)
@@ -344,6 +340,22 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
         kml_report=build_kml(source,work/'kml',root/config['kml_config'],source_reference=final_registry)
         archive=Path(kml_report['archive'])
     else: LOG.info('Reusing the verified KML archive without recalculating circles')
+    if 'CNT_CIRCLE' not in profile['fields']:
+        profile['fields'].insert(profile['fields'].index('REGION_NAME_EDW')+1,'CNT_CIRCLE')
+    atomic_json(work/'export_profile.json',profile)
+    catalog=work/'circles.csv'
+    with zipfile.ZipFile(archive) as existing,existing.open('circles.csv') as incoming,catalog.open('xb') as outgoing:
+        shutil.copyfileobj(incoming,outgoing)
+    if _hash_file(catalog)!=kml_report['circle_catalog_sha256']:
+        raise ValueError('Circle catalog differs from the verified KML archive')
+    membership=annotate_circles(source/'poi_teradata.csv',catalog,circle_neighbors)
+    if membership['source_csv_sha256']!=kml_report['source_csv_sha256']:
+        raise ValueError('Circle membership source differs from circle generation source')
+    warehouse,export=export_warehouse(source,work/'warehouse',work/'export_profile.json',region_dictionary=dictionary)
+    for name in ['poi_teradata.csv','poi_teradata.parquet','regions']:
+        shutil.move(str(warehouse/name),str(bundle/name))
+    shutil.copyfile(warehouse/'regions_index.csv',bundle/'analysis/regions_index.csv')
+    shutil.copyfile(warehouse/'profile.json',bundle/'analysis/export_profile.json')
     kml_report={**kml_report,'source_run':str(final_registry),'output':str(root/'result/analysis'),
                 'archive':str(root/'result/poi_layers.zip'),'layers_kept':False,'layer_paths':'ZIP entries','region_mapping':region_mapping}
     repack(archive,bundle/'poi_layers.zip',kml_report)
@@ -361,7 +373,7 @@ def render(registry, manifest, root, work, config, run_id, review=None, reuse=No
             'total_objects':export['total_rows'],'columns':export['columns'],'kml_counts':kml_report['counts'],
             'unassigned_objects':export['regional_export']['by_region'].get('',0),'file_checks_ok':True,
             'production_ready':True,'keep_results':1,'temporary_files_removed':False,
-            'metrics':manifest['metrics'],'source_files':len(manifest['sources']),'region_mapping':region_mapping}
+            'circle_membership':membership,'metrics':manifest['metrics'],'source_files':len(manifest['sources']),'region_mapping':region_mapping}
     if manifest.get('download'):
         atomic_json(bundle/'analysis/downloads.json',manifest['download'])
     atomic_json(bundle/'analysis/summary.json',report)

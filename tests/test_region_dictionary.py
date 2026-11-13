@@ -67,7 +67,7 @@ def test_output_mapping_preserves_keys_boundaries_and_update_state(collection):
     assert report['region_mapping']['mapped_objects']==3
     assert report['region_mapping']['renamed_objects']==3
     rows=csv_rows(root/'result/poi_teradata.csv')
-    assert len(rows)==3 and len(rows[0])==18
+    assert len(rows)==3 and len(rows[0])==19
     assert {r['region_name'] for r in rows}=={'Один филиал'}
     assert {r['REGION_NAME_EDW'] for r in rows}=={'Один филиал'}
     assert {r['REGION_NAME_EDW'] for r in pq.read_table(root/'result/poi_teradata.parquet').to_pylist()}=={'Один филиал'}

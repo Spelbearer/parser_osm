@@ -27,7 +27,7 @@ class Projection:
         self.fields = profile.get('fields')
         if self.mode not in {'typed', 'numeric_with_type'}:
             raise ValueError('osm_id_format must be typed or numeric_with_type')
-        if (not isinstance(self.fields, list) or not self.fields or any(f not in [*TERADATA_FIELDS, 'REGION_NAME_EDW'] for f in self.fields)
+        if (not isinstance(self.fields, list) or not self.fields or any(f not in [*TERADATA_FIELDS, 'REGION_NAME_EDW', 'CNT_CIRCLE'] for f in self.fields)
                 or len(self.fields) != len(set(self.fields)) or 'osm_id' not in self.fields):
             raise ValueError('fields must be unique warehouse columns including osm_id')
         if self.mode == 'numeric_with_type' and 'osm_type' not in self.fields:
@@ -39,11 +39,17 @@ class Projection:
             raise ValueError('Invalid source OSM identity')
         if self.mode == 'numeric_with_type' and int(ident) > 9223372036854775807:
             raise ValueError('OSM ID exceeds signed BIGINT range')
+        if 'CNT_CIRCLE' in self.fields and 'CNT_CIRCLE' not in source:
+            raise ValueError('CNT_CIRCLE missing; calculate circle membership with run.py --files')
         result = {f:source[f] for f in self.fields if f != 'REGION_NAME_EDW'}
         if 'REGION_NAME_EDW' in self.fields:
             if self.region_dictionary is None:
                 raise ValueError('REGION_NAME_EDW requires a region dictionary')
             result['REGION_NAME_EDW'] = self.region_dictionary.records.get(source['region_code'], {}).get('EDW', '')
+        if 'CNT_CIRCLE' in self.fields:
+            value=source.get('CNT_CIRCLE','')
+            if not value.isascii() or not value.isdigit() or not 0<=int(value)<=2147483647:
+                raise ValueError('CNT_CIRCLE missing or invalid; calculate circle membership with run.py --files')
         if self.mode == 'typed':
             result['osm_id'] = f'{kind}/{ident}'
         return result
@@ -71,7 +77,7 @@ def export(run, output_root, profile_path, region_dictionary=None):
     dates = {'update_date','source_date','first_seen_date','last_seen_date'}
     booleans = {'is_telecom','is_chain'}
     schema = pa.schema([(f, pa.float64() if f in {'lon','lat'} else pa.date32() if f in dates else
-                         pa.bool_() if f in booleans else pa.int64() if f == 'osm_id' and projection.mode == 'numeric_with_type' else pa.string()) for f in projection.fields])
+                         pa.bool_() if f in booleans else pa.int32() if f == 'CNT_CIRCLE' else pa.int64() if f == 'osm_id' and projection.mode == 'numeric_with_type' else pa.string()) for f in projection.fields])
     keys_path = output/'keys.sqlite'
     db = sqlite3.connect(keys_path)
     db.execute('CREATE TABLE keys(kind TEXT,id TEXT,PRIMARY KEY(kind,id)) WITHOUT ROWID')
@@ -94,7 +100,7 @@ def export(run, output_root, profile_path, region_dictionary=None):
                 for f,value in selected.items():
                     if f in booleans and value not in {'','0','1'}:
                         raise ValueError(f'Invalid boolean value in {f}')
-                    record[f] = (None if value == '' else int(value) if f == 'osm_id' and projection.mode == 'numeric_with_type' else float(value) if f in {'lon','lat'} else date.fromisoformat(value)
+                    record[f] = (None if value == '' else int(value) if f == 'CNT_CIRCLE' or (f == 'osm_id' and projection.mode == 'numeric_with_type') else float(value) if f in {'lon','lat'} else date.fromisoformat(value)
                                  if f in dates else bool(int(value)) if f in booleans else value)
                 batch.append(record); total += 1
                 if len(batch) >= 5000:

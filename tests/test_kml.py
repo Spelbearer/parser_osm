@@ -167,7 +167,10 @@ def test_full_run_and_reduced_warehouse_are_supported(collection,tmp_path):
     assert internal['counts']['points_exported']==3
     assert internal['counts']['circles']==3
     from poi_osm.classification import CONFIG
-    package,_=export(first['output'],tmp_path/'warehouse',CONFIG/'teradata_export.json')
+    profile=json.loads((CONFIG/'teradata_export.json').read_text())
+    profile['fields'].remove('CNT_CIRCLE')
+    profile_path=tmp_path/'projection.json';profile_path.write_text(json.dumps(profile))
+    package,_=export(first['output'],tmp_path/'warehouse',profile_path)
     reduced=build(package,tmp_path/'kml-reduced',config_path)
     assert reduced['counts']==internal['counts']
     assert len(kml_nodes(reduced,'points'))==3

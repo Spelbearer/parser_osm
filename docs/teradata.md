@@ -2,10 +2,10 @@
 
 В `result/poi_teradata.csv`, `poi_teradata.parquet` и `regions/` одна строка соответствует одному OSM-объекту. Relations исключены только на выходе; полный исходный реестр сохраняет их для геометрий и актуализации.
 
-По согласованному профилю остаются **18 колонок**:
+По согласованному профилю остаются **19 колонок**:
 
 ```text
-osm_type, osm_id, point_name, lon, lat, wkt, region_name, REGION_NAME_EDW,
+osm_type, osm_id, point_name, lon, lat, wkt, region_name, REGION_NAME_EDW, CNT_CIRCLE,
 primary_category, primary_subcategory, primary_osm_key, primary_osm_value,
 is_telecom, telecom_type, is_chain, chain_name, update_date, record_status
 ```
@@ -13,6 +13,12 @@ is_telecom, telecom_type, is_chain, chain_name, update_date, record_status
 `config/teradata_export.json` задаёт состав колонок. `osm_id_format: numeric_with_type` сохраняет исходный числовой ID; в Parquet — int64, в SQL-примере — BIGINT. Логический ключ и UNIQUE PRIMARY INDEX: **`(osm_type, osm_id)`**. `node/123` и `way/123` — разные объекты. Формат `typed` поддерживается как явная альтернативная настройка с текстовым ключом, но профиль поставки использует числовой ID и отдельный тип.
 
 CSV: UTF-8 BOM, разделитель `;`, признаки `1/0`, пустое значение для NULL. Parquet: признаки boolean, даты DATE. Исходные метаданные, исключённые из схемы загрузки, остаются в `result/.state/registry.sqlite`.
+
+`CNT_CIRCLE` — число уникальных итоговых кругов, содержащих точку: 0 вне кругов, 1 внутри одного, 2 в пересечении двух. Считаются все экспортируемые POI, включая точки без названия и региона. Используются исходные координаты и расстояние WGS84 строго меньше радиуса. Совпадающие геометрически круги считаются один раз; отбор кругов не меняется. В Parquet тип int32, в Teradata INTEGER.
+
+Каталог центров и радиусов `circles.csv` хранится внутри локального ZIP для повторяемого расчёта; в сетевой архив публикуются только KML. Сводка `analysis/summary.json` содержит статистику `circle_membership`. После обновления кода выполните `run.py --files`: PBF не требуется, старый архив кругов будет пересоздан один раз. Если столбец ещё не добавлен, выполните в Teradata `ALTER TABLE SBX_OPERATION.DAK_POI_ISH ADD CNT_CIRCLE INTEGER;`.
+
+Изменение CNT_CIRCLE учитывается загрузчиком как UPDATED, даже если исходный record_status в CSV равен UNCHANGED. `update_date` сохраняет дату изменения самой точки. При первой загрузке новые счётчики заполняют также строки с NULL в CNT_CIRCLE; повторная загрузка того же файла не пересылает неизменившиеся строки.
 
 ## Основная категория
 
@@ -28,7 +34,7 @@ CSV: UTF-8 BOM, разделитель `;`, признаки `1/0`, пустое
 
 ## Загрузка SBX_OPERATION.DAK_POI_ISH
 
-Загрузчик работает с уже созданной таблицей пользователя. [teradata_compact.sql](teradata_compact.sql) документирует её схему; приложение не выполняет CREATE/ALTER/DROP. В БД 19 колонок: 18 колонок экспорта и дополнительный `OSM_TYPE_ID = osm_type/osm_id`. PRIMARY INDEX этой MULTISET-таблицы не уникален: уникальность проверяется загрузчиком до отправки и запросом после вставки.
+Загрузчик работает с уже созданной таблицей пользователя. [teradata_compact.sql](teradata_compact.sql) документирует её схему; приложение не выполняет CREATE/ALTER/DROP. В БД 20 колонок: 19 колонок экспорта и дополнительный `OSM_TYPE_ID = osm_type/osm_id`. PRIMARY INDEX этой MULTISET-таблицы не уникален: уникальность проверяется загрузчиком до отправки и запросом после вставки.
 
 Установите необязательные зависимости (для корпоративного компьютера):
 

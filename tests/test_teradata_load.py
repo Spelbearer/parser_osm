@@ -21,7 +21,7 @@ from poi_osm.teradata_load import (
 def row(**changes):
     value = {name: '' for name in SOURCE.values()}
     value.update(osm_type='way', osm_id='123', point_name='Телефоны', lon='37.123456', lat='55.123454',
-                 region_name='Москва', REGION_NAME_EDW='Москва', is_telecom='1', is_chain='0',
+                 region_name='Москва', REGION_NAME_EDW='Москва', CNT_CIRCLE='0', is_telecom='1', is_chain='0',
                  update_date='2026-11-12', record_status='UNCHANGED')
     return {**value, **changes}
 
@@ -70,7 +70,7 @@ class Connection:
     table='SBX_OPERATION.DAK_POI_ISH'
     def __init__(self,*,fail_insert=False,wrong_count=False,initial=()):
         self.db=sqlite3.connect(':memory:')
-        self.db.execute('CREATE TABLE target('+','.join('"'+c+'" '+('INTEGER' if c in {'OSM_ID','IS_TELECOM'} else 'TEXT') for c in COLUMNS)+')')
+        self.db.execute('CREATE TABLE target('+','.join('"'+c+'" '+('INTEGER' if c in {'OSM_ID','IS_TELECOM','CNT_CIRCLE'} else 'TEXT') for c in COLUMNS)+')')
         for values in initial:
             self.db.execute('INSERT INTO target VALUES('+','.join('?' for _ in COLUMNS)+')',
                             [str(v) if isinstance(v,(Decimal,date)) else v for v in values])
@@ -415,3 +415,23 @@ def test_status_only_reset_sends_no_records_and_preserves_change_date(tmp_path):
     assert not con.batch_sizes
     updates=[sql for sql in con.statements if sql.startswith('UPDATE')]
     assert len(updates)==1 and updates[0].count(' = ')==1 and 'SET "RECORD_STATUS"' in updates[0]
+
+
+@pytest.mark.parametrize('previous', [None, 0, 3])
+def test_circle_count_change_updates_only_changed_payload(tmp_path, previous):
+    source=tmp_path/'poi.csv';save(source,[row(CNT_CIRCLE='2')])
+    initial=list(convert(row()))
+    initial[COLUMNS.index('CNT_CIRCLE')]=previous
+    con=Connection(initial=[initial])
+    report=sync_snapshot(source,1,connect=lambda **kw:con,password='p@ss')
+    assert report['changes']=={'NEW':0,'UPDATED':1,'DELETED':0,'UNCHANGED':0}
+    assert con.pending[0][COLUMNS.index('CNT_CIRCLE')]==2
+    assert con.pending[0][COLUMNS.index('UPDATE_DATE')]=='2026-11-12'
+    report=sync_snapshot(source,1,connect=lambda **kw:con,password='p@ss')
+    assert report['rows_sent']==0 and report['changes']['UNCHANGED']==1
+
+
+@pytest.mark.parametrize('value', ['', '-1', '1.5', '2147483648', 'emoji😀'])
+def test_invalid_circle_counts_are_rejected(value):
+    with pytest.raises(ValueError,match='CNT_CIRCLE'):
+        convert(row(CNT_CIRCLE=value))

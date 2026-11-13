@@ -9,6 +9,7 @@
     "wkt",
     "region_name",
     "REGION_NAME_EDW",
+    "CNT_CIRCLE",
     "primary_category",
     "primary_subcategory",
     "primary_osm_key",

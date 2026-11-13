@@ -1,4 +1,4 @@
-# POI OSM 0.9.0rc12
+# POI OSM 0.9.0rc13
 
 Кандидат выпуска: сборка POI, актуализация, очистка, CSV/Parquet, KML ZIP и синхронизация изменений в Teradata.
 
@@ -90,7 +90,7 @@ D:\osm_results\
     boundaries\                      проверенные регионы и полигоны РФ
     logs\                            до 10 журналов; отчёт последней ошибки
     result\
-        poi_teradata.csv              18 колонок, одна строка на osm_type + osm_id
+        poi_teradata.csv              19 колонок, одна строка на osm_type + osm_id
         poi_teradata.parquet
         regions\                     CSV по регионам, части до 50 000 строк
         poi_layers.zip               KML внутри архива
