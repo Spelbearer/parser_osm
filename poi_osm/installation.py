@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 from .classification import CONFIG
 from .config import contract_hash, load_settings
+from .region_dictionary import correct_known_kemerovo
 from .runtime import atomic_json
 from .sources import _hash_file
 
@@ -39,6 +40,8 @@ def portable_product(root):
     root = Path(root).resolve()
     product = read(root/'product.json')
     if product.get('version') == 2:
+        dictionary=root/product.get('region_dictionary','config/region_dictionary.json')
+        if dictionary.is_file() and dictionary.resolve().is_relative_to(root): correct_known_kemerovo(dictionary)
         return product
     if product.get('version') != 1:
         raise ValueError('Unsupported product configuration version')
@@ -88,6 +91,7 @@ def portable_product(root):
         else:
             source = CONFIG/'region_dictionary.json'
     copy_exact(source, target)
+    correct_known_kemerovo(target)
     product['region_dictionary'] = target.relative_to(root).as_posix()
     settings['project_root'] = '..'
     product['version'] = 2
@@ -142,7 +146,9 @@ def local_settings(path):
         parsed = urlsplit(proxy.get('url') or '')
         if parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError('proxy.url must be a proxy URL without embedded credentials')
-    return {**config, 'root':base/product_folder, 'input':base/input_folder, 'source_mode':mode, 'proxy':proxy}
+    from .share_export import settings as publication_settings
+    publication=publication_settings(config.get('publication'),base)
+    return {**config, 'publication':publication, 'root':base/product_folder, 'input':base/input_folder, 'source_mode':mode, 'proxy':proxy}
 
 
 @contextmanager

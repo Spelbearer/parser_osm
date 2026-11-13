@@ -6,7 +6,8 @@
   "import_notes": [
     "RU-KEM: EDW corrected from Тверь to Кемерово by user instruction.",
     "RU-TY: EDW=Хакасия retained as intentional operational mapping.",
-    "FLAG and macroregion attributes are stored as reference data, not output filters."
+    "FLAG and macroregion attributes are stored as reference data, not output filters.",
+    "RU-KEM: REGION_NAME_POI=Кемеровская область, CEM=Кемерово; macroregion 7/Центр/Operations_Center and FLAG=1 explicitly confirmed by user."
   ],
   "regions": [
     {
@@ -254,9 +255,9 @@
     {
       "region_code": "RU-KEM",
       "region_name": "Кемеровская область — Кузбасс",
-      "REGION_NAME_POI": "Тверская область",
+      "REGION_NAME_POI": "Кемеровская область",
       "EDW": "Кемерово",
-      "CEM": "Тверь",
+      "CEM": "Кемерово",
       "MACROREGION_ID": 7,
       "MACROREGION_NAME": "Центр",
       "OPERATION_MR_FOLDER": "Operations_Center",

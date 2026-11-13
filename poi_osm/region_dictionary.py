@@ -8,6 +8,8 @@ import os
 from collections import Counter
 from pathlib import Path
 
+from .runtime import atomic_json
+
 
 class RegionDictionary:
     def __init__(self, path, registry):
@@ -88,3 +90,21 @@ class RegionDictionary:
                 row.update(region_code=code, source_region_name=region["region_name"],
                            region_name=self.label(code, region["region_name"]))
                 writer.writerow(row)
+
+
+
+def correct_known_kemerovo(path):
+    """Apply only the known spreadsheet typo correction confirmed by the user."""
+    path=Path(path)
+    document=json.loads(path.read_text(encoding='utf-8-sig'))
+    for record in document.get('regions',[]):
+        if (record.get('region_code')=='RU-KEM' and record.get('EDW')=='Кемерово'
+                and record.get('MACROREGION_NAME')=='Центр' and record.get('MACROREGION_ID')==7
+                and record.get('REGION_NAME_POI') in {'Тверская область','Кемеровская область'}
+                and record.get('CEM') in {'Тверь','Кемерово'}
+                and (record.get('REGION_NAME_POI')=='Тверская область' or record.get('CEM')=='Тверь')):
+            record.update(REGION_NAME_POI='Кемеровская область',CEM='Кемерово')
+            document.setdefault('import_notes',[]).append('RU-KEM: REGION_NAME_POI/CEM corrected; macroregion Центр retained by user instruction.')
+            atomic_json(path,document)
+            return True
+    return False

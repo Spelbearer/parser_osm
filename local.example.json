@@ -7,5 +7,10 @@
     "enabled": false,
     "url": "http://t2rs-fgproxy.corp.tele2.ru:8080",
     "windows_negotiate": false
+  },
+  "publication": {
+    "enabled": false,
+    "directory": "\\\\corp.tele2.ru\\operations_MR\\Operations_All\\Потенциал_рынка",
+    "region_column": "EDW"
   }
 }

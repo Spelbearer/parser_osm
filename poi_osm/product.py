@@ -579,6 +579,7 @@ def main(argv=None):
     parser.add_argument('--local-config',type=Path,help='Local machine configuration; defaults to local.json when --root is omitted')
     parser.add_argument('--root',type=Path,help='Output root, e.g. D:\\osm_results')
     group=parser.add_mutually_exclusive_group()
+    group.add_argument('--publish-kml',action='store_true',help='Publish the existing circle ZIP to the configured destination without rebuilding')
     group.add_argument('--make-portable',action='store_true',help='Copy rule dictionaries into the existing installation and store relative paths')
     group.add_argument('--init',action='store_true',help='Initialize a new installation using previously reviewed boundaries')
     group.add_argument('--adopt',action='store_true',help='Migrate a reviewed successful legacy result and remove recognised legacy artifacts')
@@ -598,7 +599,7 @@ def main(argv=None):
     if args.root is None:
         machine=local_settings(args.local_config or REPO/'local.json')
         args.root=machine['root']
-        explicit=any((args.init,args.adopt,args.make_portable,args.load_teradata,args.check_teradata,args.download,args.files))
+        explicit=any((args.init,args.adopt,args.make_portable,args.publish_kml,args.load_teradata,args.check_teradata,args.download,args.files))
         if not explicit:
             args.files=machine['source_mode']=='files'
             args.download=machine['source_mode']=='download'
@@ -606,6 +607,13 @@ def main(argv=None):
             args.windows_proxy=True
     if args.windows_proxy and not args.download:
         parser.error('--windows-proxy is only valid with --download')
+    if args.publish_kml:
+        if any(value is not None for value in (args.input,args.boundaries,args.settings,args.profile)):
+            parser.error('--publish-kml uses the existing local result')
+        from .share_export import publish_layers
+        from .share_export import settings as publication_settings
+        published=publish_layers(args.root,machine['publication'] if machine else publication_settings())
+        print(json.dumps(published,ensure_ascii=False,indent=2));return 0
     if args.load_teradata or args.check_teradata:
         if any(value is not None for value in (args.input, args.boundaries, args.settings, args.profile)):
             parser.error('Teradata modes only accept --root')
@@ -621,7 +629,12 @@ def main(argv=None):
         report=execute(args.root,'portable' if args.make_portable else 'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input or local_input,boundary=args.boundaries,windows_proxy=args.windows_proxy)
     if report['status'] in {'PRODUCT_INITIALIZED','PRODUCT_PORTABLE'}:
         print(json.dumps(report,ensure_ascii=False,indent=2));return 0
+    if machine and machine['publication']['enabled']:
+        from .share_export import publish_layers
+        published=publish_layers(args.root,machine['publication'])
+        report['published_archive']=published['archive']
     brief={key:report[key] for key in ['status','output','archive','total_objects','unassigned_objects','cleanup_complete']}
+    if report.get('published_archive'): brief['published_archive']=report['published_archive']
     brief['kml_points']=report['kml_counts']['points_exported']
     brief['circles']=report['kml_counts']['circles']
     brief['summary']=str(Path(args.root).resolve()/'result/analysis/summary.json')
