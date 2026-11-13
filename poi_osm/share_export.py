@@ -1,8 +1,6 @@
 """Publish a circle-only ZIP with macroregion/EDW layer names to a destination folder."""
 from __future__ import annotations
 
-import csv
-import io
 import json
 import logging
 import os
@@ -51,6 +49,9 @@ def rename_document(incoming,outgoing,title):
     outgoing.write(f'<?xml version="1.0" encoding="UTF-8"?><kml xmlns="{NS}"><Document>'.encode())
     label=ET.Element('{'+NS+'}name');label.text=title
     outgoing.write(ET.tostring(label,encoding='utf-8'))
+    attribution=ET.Element('{'+NS+'}description')
+    attribution.text='© OpenStreetMap contributors; ODbL-1.0; https://www.openstreetmap.org/copyright'
+    outgoing.write(ET.tostring(attribution,encoding='utf-8'))
     depth=0;document=None;features=0
     for event,node in ET.iterparse(incoming,events=('start','end')):
         if event=='start':
@@ -60,7 +61,7 @@ def rename_document(incoming,outgoing,title):
                 document=node
         else:
             if depth==3:
-                if node.tag!='{'+NS+'}name': outgoing.write(ET.tostring(node,encoding='utf-8'))
+                if node.tag not in {'{'+NS+'}name','{'+NS+'}description'}: outgoing.write(ET.tostring(node,encoding='utf-8'))
                 features+=node.tag=='{'+NS+'}Placemark'
                 document.remove(node);node.clear()
             depth-=1
@@ -101,17 +102,12 @@ def package(source,target,dictionary,column,product_run_id,source_date=None):
                 if count!=entry['features']: raise ValueError('Published layer count differs from source')
                 files.append({'file':filename,'region_code':entry['region_code'],'region_name':entry['label'],
                               'macroregion':entry['macroregion'],'circles':count})
-            index=io.StringIO(newline='')
-            writer=csv.DictWriter(index,fieldnames=['file','region_code','region_name','macroregion','circles'],delimiter=';')
-            writer.writeheader();writer.writerows(files)
-            archive.writestr('regions_index.csv',index.getvalue().encode('utf-8-sig'))
             packaged={'status':'KML_SHARE_PACKAGE','source_product_run_id':product_run_id,
                       'source_date':source_date,'source_zip_sha256':_hash_file(source),'region_column':column,
                       'dictionary_sha256':dictionary.metadata['dictionary_sha256'],'files':files,
                       'circles':sum(entry['circles'] for entry in files),'license':report.get('license','ODbL-1.0; © OpenStreetMap contributors')}
-            archive.writestr('summary.json',json.dumps(packaged,ensure_ascii=False,indent=2))
     with zipfile.ZipFile(target) as archive:
-        if archive.testzip() is not None or len(set(archive.namelist()))!=len(files)+2:
+        if archive.testzip() is not None or set(archive.namelist())!={entry['file'] for entry in files}:
             raise ValueError('Named publication ZIP verification failed')
     return packaged
 
@@ -153,7 +149,7 @@ def publish_layers(root,options,*,now=None):
             remote_temporary.replace(final)
             result={'status':'KML_PUBLISH_SUCCESS','archive':str(final),'sha256':digest,
                     'source_product_run_id':summary.get('product_run_id'),'circles':packaged['circles'],
-                    'layers':len(packaged['files']),'region_column':options['region_column'],
+                    'layers':len(packaged['files']),'region_column':options['region_column'],'package':packaged,
                     'published_at':published_at.isoformat()}
             atomic_json(report_path,result)
             return result

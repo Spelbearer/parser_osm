@@ -46,7 +46,8 @@ def test_publish_circle_zip_with_macro_edw_names_and_moscow_date(installation,tm
         assert not any('points/' in name for name in archive.namelist())
         kml=archive.read('Байкал_и_Дальний_Восток_(Благовещенск).kml').decode()
         assert 'Байкал_и_Дальний_Восток_(Благовещенск)' in kml
-        assert json.loads(archive.read('summary.json'))['circles']==1
+        assert all(name.endswith('.kml') for name in archive.namelist())
+        assert 'OpenStreetMap contributors' in kml
     assert report['status']=='KML_PUBLISH_SUCCESS' and report['circles']==1
     assert (root/'result/poi_layers.zip').read_bytes()==old
     assert not (root/'.work').exists() and not list(share.glob('*.part'))
