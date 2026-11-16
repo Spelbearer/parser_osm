@@ -1,5 +1,8 @@
 """Основной скрипт POI: python run.py (local.json) или --root <папка>."""
 import logging
+import sys
+
+sys.dont_write_bytecode = True
 
 from poi_osm.product import main
 

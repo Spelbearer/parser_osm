@@ -66,3 +66,7 @@ def atomic_json(path: Path, payload: dict):
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
+
+
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))

@@ -14,11 +14,8 @@ from .classification import CONFIG
 from .config import contract_hash, load_settings
 from .region_dictionary import correct_known_kemerovo
 from .runtime import atomic_json
+from .runtime import read_json as read
 from .sources import _hash_file
-
-
-def read(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
 
 
 def copy_exact(source, target):

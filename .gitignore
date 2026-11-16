@@ -18,3 +18,13 @@ russia_output/
 
 # Machine-specific base path, source mode and proxy settings.
 /local.json
+
+# Generated data and tool caches are never source files.
+.ruff_cache/
+*.pyo
+/result/
+/pbf/
+*.osm.pbf
+*.osm.pbf.md5
+/build/
+/dist/

@@ -9,7 +9,6 @@ import re
 import shutil
 import signal
 import sqlite3
-import stat
 import subprocess
 import sys
 import time
@@ -23,6 +22,7 @@ from . import __version__
 from .audit import audit
 from .circle_counts import annotate as annotate_circles
 from .classification import CONFIG
+from .cleanup import cleanup_legacy, cleanup_project, remove_owned
 from .collection import inspect_sources, profile_from
 from .config import load_settings
 from .geography import RegionIndex
@@ -40,135 +40,12 @@ from .objects import export_objects
 from .region_dictionary import RegionDictionary
 from .region_files import split_regions
 from .runtime import atomic_json, configure_utf8, process_lock
+from .runtime import read_json as read
 from .sources import _hash_file
 from .teradata_export import export as export_warehouse
 
 LOG = logging.getLogger(__name__)
 REPO = Path(__file__).resolve().parents[1]
-
-
-def read(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
-
-
-def is_link(path):
-    if path.is_symlink(): return True
-    try: return bool(getattr(path.lstat(),'st_file_attributes',0) & getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',0))
-    except FileNotFoundError: return False
-
-
-def remove_owned(path, root, protected=()):
-    path,root = Path(path),Path(root).resolve()
-    if not path.exists() and not is_link(path): return
-    target = path.resolve()
-    if target == root or not target.is_relative_to(root) or is_link(path):
-        raise ValueError(f'Refusing cleanup outside owned output: {path}')
-    for item in protected:
-        item=Path(item).resolve()
-        if item==target or item.is_relative_to(target): raise ValueError(f'Cleanup would remove protected input: {item}')
-    if path.is_dir():
-        for directory,dirs,files in os.walk(path,followlinks=False):
-            if any(is_link(Path(directory)/name) for name in dirs+files):
-                raise ValueError(f'Refusing cleanup of links/junctions: {path}')
-        shutil.rmtree(path)
-    else: path.unlink()
-
-
-def cleanup_legacy(root, source):
-    """Delete only recognised application artifacts after a valid current bundle exists."""
-    root=Path(root); removed=[]; skipped=[]
-    protected=[s['path'] for s in source.get('sources',[])]
-    def delete(path):
-        try:
-            remove_owned(path,root,protected); removed.append(str(path.relative_to(root)))
-        except (OSError,ValueError) as error:
-            skipped.append({'path':str(path),'reason':str(error)})
-    for family in ['runs','preview_runs','teradata','approved','work']:
-        directory=root/family
-        if not directory.is_dir() or is_link(directory): continue
-        for item in list(directory.iterdir()):
-            if not item.is_dir() or is_link(item):
-                skipped.append({'path':str(item),'reason':'Unrecognised artifact'});continue
-            known=False
-            try:
-                if family=='approved':
-                    known=item.name.startswith('approved-') and (item/'approval.json').is_file() and read(item/'settings.json').get('boundaries_reviewed') is True
-                else:
-                    info=read(item/'summary.json')
-                    known=bool(info.get('source_run') or info.get('sources') or info.get('run_id')) and info.get('status') in {
-                        'SUCCESS','COLLECTION_PREVIEW_SUCCESS','COLLECTION_PREVIEW_INCOMPLETE','TERADATA_EXPORT_SUCCESS','RUNNING','FAILED','CANCELLED'}
-            except (OSError,ValueError): pass
-            if known: delete(item)
-            else: skipped.append({'path':str(item),'reason':'Unrecognised artifact'})
-        try: directory.rmdir()
-        except OSError: pass
-    cache=root/'cache'
-    if cache.is_dir() and not is_link(cache):
-        for item in list(cache.iterdir()):
-            if item.is_dir() and re.fullmatch(r'[0-9a-f]{64}',item.name): delete(item)
-            else: skipped.append({'path':str(item),'reason':'Unrecognised cache entry'})
-        try: cache.rmdir()
-        except OSError: pass
-    kml=root/'kml'
-    if (kml/'last_success.json').is_file():
-        try:
-            if read(kml/'last_success.json').get('status')=='KML_EXPORT_SUCCESS':
-                allowed=all(p.name in {'runs','work','last_success.json','last_failure.json'} or re.fullmatch(r'poi_layers-[0-9T-]+[a-f0-9]+\.zip',p.name) for p in kml.iterdir())
-                if allowed: delete(kml)
-                else: skipped.append({'path':str(kml),'reason':'Contains unrecognised files; preserved'})
-        except (OSError,ValueError): pass
-    checks=root/'checks'
-    if checks.is_dir() and not is_link(checks):
-        for item in list(checks.iterdir()):
-            known=False
-            try:
-                if item.is_file() and re.fullmatch(r'(audit|boundary-diagnostics)-[0-9T-]+[a-f0-9]+\.json',item.name):
-                    doc=read(item);known='run' in doc
-                elif item.is_dir() and item.name.startswith('boundary-recovery-'):
-                    known=read(item/'report.json').get('status') in {'RECOVERED_CANDIDATES','RECOVERY_INCOMPLETE'}
-            except (OSError,ValueError): pass
-            if known: delete(item)
-            else: skipped.append({'path':str(item),'reason':'Unrecognised diagnostic file'})
-        try: checks.rmdir()
-        except OSError: pass
-    # The lock itself is removed only after the legacy lock handle has closed.
-    state=root/'state'
-    if state.is_dir() and set(p.name for p in state.iterdir()) <= {'last_success.json','process.lock'}:
-        delete(state)
-    return {'removed':removed,'skipped':skipped}
-
-
-def cleanup_project(project, source):
-    project=Path(project).resolve(); result={'removed':[],'skipped':[]}
-    protected=[s['path'] for s in source.get('sources',[])]
-    def delete(path):
-        try:
-            remove_owned(path,project,protected);result['removed'].append(str(path))
-        except (OSError,ValueError) as error: result['skipped'].append({'path':str(path),'reason':str(error)})
-    demo=project/'demo'
-    try:
-        if (demo/'settings.json').is_file():
-            settings=read(demo/'settings.json')
-            if settings.get('coverage_id')=='demo' and settings.get('input',{}).get('path')=='example.osm.pbf' and (demo/'example.osm.pbf').stat().st_size<1000000:
-                delete(demo)
-    except (OSError,ValueError) as error: result['skipped'].append({'path':str(demo),'reason':str(error)})
-    previews=project/'preview'
-    if previews.is_dir() and not is_link(previews):
-        for child in list(previews.iterdir()):
-            try:
-                document=read(child/'summary.json')
-                if document.get('preview_only') is True and document.get('status') in {'PREVIEW_SUCCESS','PREVIEW_INCOMPLETE','FAILED','CANCELLED'}:
-                    delete(child)
-                else: result['skipped'].append({'path':str(child),'reason':'Not a completed owned preview'})
-            except (OSError,ValueError): result['skipped'].append({'path':str(child),'reason':'Unrecognised preview artifact'})
-        try: previews.rmdir()
-        except OSError: pass
-    for relative in ['__pycache__','poi_osm/__pycache__','tests/__pycache__','scripts/__pycache__']:
-        path=project/relative
-        if path.exists(): delete(path)
-    pytest_cache=project/'.pytest_cache'
-    if (pytest_cache/'CACHEDIR.TAG').is_file(): delete(pytest_cache)
-    return result
 
 
 def recover_swap(root):
@@ -385,7 +262,7 @@ def render_in_child(registry, manifest, root, work, config, run_id, review, reus
     atomic_json(job, {'registry':str(registry), 'manifest':manifest, 'root':str(root),
                      'work':str(work), 'config':config, 'run_id':run_id,
                      'review':str(review) if review else None, 'reuse':str(reuse) if reuse else None})
-    result = run_logged_child([sys.executable, '-m', 'poi_osm.render_worker', str(job)],
+    result = run_logged_child([sys.executable, '-B', '-m', 'poi_osm.render_worker', str(job)],
                               work/'render-result.json', work, 'Export')
     bundle = Path(result['bundle'])
     if bundle.resolve() != (work/'bundle').resolve():
@@ -400,7 +277,7 @@ def run_collection(root, work, config, input_folder=None):
     if previous.exists():
         prior=read(previous);prior.update(registry=str(root/'result/.state/registry.sqlite'),output=str(root/'result'))
         atomic_json(transient/'state/last_success.json',prior)
-    args=[sys.executable,'-m','poi_osm.collection',str(input_folder or config['input_folder']),'--output',str(transient),
+    args=[sys.executable,'-B','-m','poi_osm.collection',str(input_folder or config['input_folder']),'--output',str(transient),
           '--config',str(root/config['settings']),'--profile',str(root/config['collection_profile']),'--production','--registry-only']
     LOG.info('Extracting the current PBF snapshot; temporary caches will be removed after completion')
     return run_logged_child(args,work/'collection-result.json',work,'Collection')
@@ -486,18 +363,35 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
         if action!='adopt' and (root/'state').exists():
             legacy_locks.enter_context(process_lock(root/'state/process.lock'))
         if (root/'product.json').exists(): portable_product(root)
-        logs_limit=validate_product(root,product_config(root),local_inputs=action not in {'download','files','portable'} and input_folder is None) if (root/'product.json').exists() else 10
+        logs_limit=validate_product(root,product_config(root),local_inputs=action not in {'download','files','portable','clean'} and input_folder is None) if (root/'product.json').exists() else 10
+        stale_cleanup={'removed':[],'skipped':[],'bytes_removed':0}
         old_work=root/'.work'
         if old_work.exists():
             for item in old_work.iterdir():
                 if not (item/'owner.json').is_file() or read(item/'owner.json').get('root')!=str(root):
                     raise ValueError('Unrecognised working directory: '+str(item))
                 if alive(read(item/'owner.json').get('child_pid')): raise RuntimeError('Previous collection child is still running')
-                remove_owned(item,root)
+                stale_cleanup['bytes_removed']+=remove_owned(item,root)
+                stale_cleanup['removed'].append(str(item))
         work=root/'.work'/run_id;work.mkdir(parents=True)
         atomic_json(work/'owner.json',{'root':str(root),'child_pid':None})
         report=None
         try:
+            if action=='clean':
+                if not (root/'product.json').is_file():
+                    raise ValueError('An existing product installation is required')
+                manifest=read(root/'result/.state/last_success.json') if (root/'result/.state/last_success.json').is_file() else {'sources':[]}
+                summary=root/'result/analysis/summary.json'
+                legacy_locks.close()
+                cleanup=cleanup_legacy(root,manifest) if summary.is_file() and read(summary).get('status')=='PRODUCT_SUCCESS' else {'removed':[],'skipped':[],'bytes_removed':0}
+                project_cleanup=cleanup_project(product_config(root).get('_cleanup_project',REPO),manifest)
+                for key in ('removed','skipped'): cleanup[key].extend(project_cleanup[key])
+                cleanup['bytes_removed']+=project_cleanup['bytes_removed']+stale_cleanup['bytes_removed']
+                cleanup['removed'].extend(stale_cleanup['removed'])
+                result={'status':'PRODUCT_CLEAN_SUCCESS','root':str(root),'cleanup':cleanup}
+                atomic_json(root/'logs/cleanup.json',result)
+                LOG.info('Cleanup completed: %d artifacts removed; %d bytes; %d preserved entries',len(cleanup['removed']),cleanup['bytes_removed'],len(cleanup['skipped']))
+                return result
             if action=='portable':
                 if not (root/'product.json').is_file(): raise ValueError('An existing product installation is required')
                 return {'status':'PRODUCT_PORTABLE','root':str(root),'version':__version__}
@@ -509,7 +403,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 # Read-only source verification runs before configuration is saved.
                 inspect_sources(Path(input_folder),profile_from(Path(profile_path)))
                 config=configure_product(root,settings_path,profile_path,boundary,input_folder)
-                logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable'})
+                logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable','clean'})
                 LOG.info('Configuration initialized; run the same command without --init to process PBF')
                 return {'status':'PRODUCT_INITIALIZED','version':__version__,'root':str(root),'input_folder':config['input_folder']}
             if action=='adopt':
@@ -532,7 +426,7 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                 if not (root/'product.json').exists(): raise ValueError('First use --adopt with the existing reviewed production result')
                 config=product_config(root)
                 if input_folder is not None: config['input_folder']=str(Path(input_folder).resolve())
-                logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable'})
+                logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable','clean'})
                 check_publish_access(root,work,run_id)
                 if action=='files':
                     if not (root/'result/.state/last_success.json').exists():
@@ -550,13 +444,15 @@ def execute(root, action, settings_path=None, profile_path=None, *, input_folder
                         manifest=run_collection(root,work,config)
                     registry=Path(manifest['registry'])
                     review=Path(manifest['output'])/'review.csv';reuse=None
-            logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable'})
+            logs_limit=validate_product(root,config,local_inputs=action not in {'download','files','portable','clean'})
             bundle,report=render_in_child(registry,manifest,root,work,config,run_id,review,reuse)
             publish(bundle,root,work,run_id)
             legacy_locks.close()
             cleanup=cleanup_legacy(root,manifest)
             if action!='adopt': cleanup['removed'].extend(['working files','unpacked KML','previous result'])
             project_cleanup=cleanup_project(config.get('_cleanup_project',REPO),manifest)
+            cleanup['bytes_removed']+=project_cleanup['bytes_removed']+stale_cleanup['bytes_removed']
+            cleanup['removed'].extend(stale_cleanup['removed'])
             cleanup['removed'].extend(project_cleanup['removed'])
             cleanup['skipped'].extend(project_cleanup['skipped'])
             atomic_json(root/'result/analysis/cleanup.json',cleanup)
@@ -591,6 +487,7 @@ def main(argv=None):
     parser.add_argument('--local-config',type=Path,help='Local machine configuration; defaults to local.json when --root is omitted')
     parser.add_argument('--root',type=Path,help='Output root, e.g. D:\\osm_results')
     group=parser.add_mutually_exclusive_group()
+    group.add_argument('--clean',action='store_true',help='Remove recognised temporary files and caches without rebuilding or changing the current result')
     group.add_argument('--publish-kml',action='store_true',help='Publish the existing circle ZIP to the configured destination without rebuilding')
     group.add_argument('--make-portable',action='store_true',help='Copy rule dictionaries into the existing installation and store relative paths')
     group.add_argument('--init',action='store_true',help='Initialize a new installation using previously reviewed boundaries')
@@ -611,7 +508,7 @@ def main(argv=None):
     if args.root is None:
         machine=local_settings(args.local_config or REPO/'local.json')
         args.root=machine['root']
-        explicit=any((args.init,args.adopt,args.make_portable,args.publish_kml,args.load_teradata,args.check_teradata,args.download,args.files))
+        explicit=any((args.clean,args.init,args.adopt,args.make_portable,args.publish_kml,args.load_teradata,args.check_teradata,args.download,args.files))
         if not explicit:
             args.files=machine['source_mode']=='files'
             args.download=machine['source_mode']=='download'
@@ -636,10 +533,10 @@ def main(argv=None):
     if not args.init and (args.input is not None or args.boundaries is not None):
         parser.error('--input and --boundaries are only valid with --init; edit product.json for an existing installation')
     if args.init and (args.input is None or args.boundaries is None): parser.error('--init requires --input and --boundaries')
-    local_input=machine['input'] if machine and not any((args.init,args.adopt,args.files,args.download,args.make_portable)) else None
+    local_input=machine['input'] if machine and not any((args.init,args.adopt,args.files,args.download,args.make_portable,args.clean)) else None
     with proxy_environment(machine['proxy']) if machine else nullcontext():
-        report=execute(args.root,'portable' if args.make_portable else 'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input or local_input,boundary=args.boundaries,windows_proxy=args.windows_proxy)
-    if report['status'] in {'PRODUCT_INITIALIZED','PRODUCT_PORTABLE'}:
+        report=execute(args.root,'clean' if args.clean else 'portable' if args.make_portable else 'init' if args.init else 'adopt' if args.adopt else 'files' if args.files else 'download' if args.download else 'run',args.settings,args.profile,input_folder=args.input or local_input,boundary=args.boundaries,windows_proxy=args.windows_proxy)
+    if report['status'] in {'PRODUCT_INITIALIZED','PRODUCT_PORTABLE','PRODUCT_CLEAN_SUCCESS'}:
         print(json.dumps(report,ensure_ascii=False,indent=2));return 0
     if machine and machine['publication']['enabled']:
         from .share_export import publish_layers

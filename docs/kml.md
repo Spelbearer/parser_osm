@@ -14,10 +14,13 @@ git pull
 ```text
 layers/circles/RU-MOW_Москва_001.kml
 ... отдельные файлы по регионам и части ...
+circles.csv
 regions_index.csv
 config.json
 summary.json
 ```
+
+Каталог circles.csv содержит уникальные центры и радиусы итоговых кругов для расчёта CNT_CIRCLE. Он находится только в локальном архиве; сетевой архив содержит KML.
 
 ## Зоны посещения
 

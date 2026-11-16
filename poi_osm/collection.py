@@ -135,7 +135,7 @@ def worker_for(source,settings,config,output,*,require_cache=False):
     atomic_json(job/'source.json',source)
     logging.info('WORKER %s; log=%s',source['extract'],job/'worker.log')
     with (job/'console.txt').open('w',encoding='utf-8') as stdout:
-        process=subprocess.Popen([sys.executable,'-m','poi_osm.collection_worker','--source',str(job/'source.json'),
+        process=subprocess.Popen([sys.executable,'-B','-m','poi_osm.collection_worker','--source',str(job/'source.json'),
                                   '--job',str(job),'--config',str(config.resolve())],cwd=REPO,stdout=stdout)
         try:
             code=process.wait()
